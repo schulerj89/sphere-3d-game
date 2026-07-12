@@ -11,13 +11,20 @@ import {
 } from './World';
 import { MobileInput } from '../input/MobileInput';
 
-type GamePhase = 'title' | 'playing' | 'cinematic' | 'complete';
+type GamePhase = 'title' | 'playing' | 'cinematic' | 'defeat' | 'complete';
 
 interface LaunchCinematic {
   readonly source: Planet;
   readonly destination: Planet;
   readonly start: THREE.Vector3;
   readonly end: THREE.Vector3;
+  elapsed: number;
+}
+
+interface DefeatCinematic {
+  readonly origin: THREE.Vector3;
+  readonly normal: THREE.Vector3;
+  readonly heading: THREE.Vector3;
   elapsed: number;
 }
 
@@ -64,6 +71,23 @@ export class Game {
   private readonly lookAtTarget = new THREE.Vector3();
   private readonly galaxy = new GalaxyBackdrop();
   private readonly trail = new StardustTrail();
+  private readonly defeatFx = new THREE.Group();
+  private readonly defeatRingMaterial = new THREE.MeshBasicMaterial({
+    color: 0x8fe9ff,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  private readonly defeatCoreMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffb6c9,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  private readonly defeatRing = new THREE.Mesh(new THREE.TorusGeometry(1.2, 0.065, 8, 40), this.defeatRingMaterial);
+  private readonly defeatCore = new THREE.Mesh(new THREE.SphereGeometry(0.26, 16, 12), this.defeatCoreMaterial);
 
   private renderer!: THREE.WebGLRenderer;
   private input: MobileInput | undefined;
@@ -71,6 +95,7 @@ export class Game {
   private activePlanet!: Planet;
   private phase: GamePhase = 'title';
   private cinematic: LaunchCinematic | undefined;
+  private defeatCinematic: DefeatCinematic | undefined;
   private elapsed = 0;
   private lastFrameTimestamp = performance.now();
   private playerHeight = 0;
@@ -97,6 +122,8 @@ export class Game {
   private titleScreen!: HTMLElement;
   private hud!: HTMLElement;
   private cinematicOverlay!: HTMLElement;
+  private cinematicTitle!: HTMLElement;
+  private cinematicSubtitle!: HTMLElement;
   private completeScreen!: HTMLElement;
   private planetName!: HTMLElement;
   private missionText!: HTMLElement;
@@ -123,6 +150,8 @@ export class Game {
     this.titleScreen = this.element('.title-screen');
     this.hud = this.element('.hud');
     this.cinematicOverlay = this.element('.cinematic-overlay');
+    this.cinematicTitle = this.element('.cinematic-overlay p');
+    this.cinematicSubtitle = this.element('.cinematic-overlay span');
     this.completeScreen = this.element('.complete-screen');
     this.planetName = this.element('.hud-planet');
     this.missionText = this.element('.mission-copy');
@@ -152,7 +181,10 @@ export class Game {
   private configureScene(): void {
     this.scene.background = new THREE.Color(0x020514);
     this.scene.fog = new THREE.FogExp2(0x09122e, 0.0065);
-    this.scene.add(this.galaxy.group, this.trail.mesh, this.hero.group);
+    this.defeatRing.rotation.x = Math.PI / 2;
+    this.defeatFx.add(this.defeatRing, this.defeatCore);
+    this.defeatFx.visible = false;
+    this.scene.add(this.galaxy.group, this.trail.mesh, this.hero.group, this.defeatFx);
 
     const hemisphere = new THREE.HemisphereLight(0x99d8ff, 0x120d2d, 2.4);
     const keyLight = new THREE.DirectionalLight(0xfff4d5, 3.2);
@@ -209,6 +241,8 @@ export class Game {
       this.updatePlaying(delta);
     } else if (this.phase === 'cinematic') {
       this.updateCinematic(delta);
+    } else if (this.phase === 'defeat') {
+      this.updateDefeat(delta);
     } else if (this.phase === 'title') {
       this.updateTitleCamera(delta);
     } else {
@@ -336,9 +370,7 @@ export class Game {
     this.audio.play('hit');
     this.triggerAnimation('hurt', 0.4);
     if (this.health <= 0) {
-      this.health = 3;
-      this.placePlayerAt(this.activePlanet, this.activePlanet.definition.startNormal);
-      this.setStatus('Rescue star restored you to the start beacon.');
+      this.beginDefeat();
     } else {
       this.setStatus('Ouch! Pounce from above or keep a little distance.');
     }
@@ -364,6 +396,9 @@ export class Game {
       elapsed: 0,
     };
     this.cinematicOverlay.classList.add('is-active');
+    this.cinematicOverlay.classList.remove('is-defeat');
+    this.hud.classList.add('is-hidden');
+    this.setCinematicCopy('ORBITAL SLINGSHOT', 'Hold tight, runner.');
     this.audio.play('launch');
     this.audio.setCinematic(true);
     this.setStatus(`Slingshotting to ${destination.definition.name}…`);
@@ -373,20 +408,54 @@ export class Game {
     const cinematic = this.cinematic;
     if (!cinematic) return;
     cinematic.elapsed += delta;
-    const duration = 3.25;
+    const duration = 4.35;
     const raw = THREE.MathUtils.clamp(cinematic.elapsed / duration, 0, 1);
     const t = raw * raw * (3 - 2 * raw);
-    const middle = cinematic.start.clone().lerp(cinematic.end, 0.5).add(new THREE.Vector3(0, 31, 0));
+    const middle = cinematic.start.clone().lerp(cinematic.end, 0.5).add(new THREE.Vector3(0, 34, 0));
     const position = quadraticBezier(cinematic.start, middle, cinematic.end, t);
     const future = quadraticBezier(cinematic.start, middle, cinematic.end, Math.min(1, t + 0.02));
     const velocity = future.sub(position).normalize();
     this.hero.group.position.copy(position);
-    this.hero.group.quaternion.copy(surfaceOrientation(velocity.clone().cross(WORLD_UP).cross(velocity).normalize(), velocity));
+    const cinematicNormal = velocity.clone().cross(WORLD_UP).cross(velocity).normalize();
+    if (cinematicNormal.lengthSq() < 0.001) cinematicNormal.copy(WORLD_UP);
+    this.hero.group.quaternion.copy(surfaceOrientation(cinematicNormal, velocity));
     this.hero.setRunCycle(8, this.elapsed, true);
 
-    const cameraTarget = position.clone().addScaledVector(velocity, 4);
-    const cinematicOffset = new THREE.Vector3(10, 7, 15).applyAxisAngle(WORLD_UP, this.elapsed * 0.36);
-    this.camera.position.lerp(position.clone().add(cinematicOffset), 1 - Math.exp(-3.8 * delta));
+    // Three deliberate camera beats keep the transfer readable: an intimate
+    // launch close-up, a wide reveal of the interplanetary route, then a
+    // compressed approach that makes the destination feel earned.
+    const side = new THREE.Vector3().crossVectors(WORLD_UP, velocity).normalize();
+    if (side.lengthSq() < 0.001) side.set(1, 0, 0);
+    const orbit = this.elapsed * 0.72;
+    const orbitSide = side.clone().multiplyScalar(Math.sin(orbit));
+    const cameraOffset = new THREE.Vector3();
+    const cameraTarget = position.clone();
+    if (raw < 0.22) {
+      const beat = smoothstep(raw / 0.22);
+      cameraOffset
+        .addScaledVector(velocity, THREE.MathUtils.lerp(-4.4, -8.5, beat))
+        .addScaledVector(WORLD_UP, THREE.MathUtils.lerp(1.4, 4.5, beat))
+        .addScaledVector(orbitSide, THREE.MathUtils.lerp(1.8, 4.5, beat));
+      cameraTarget.addScaledVector(velocity, 1.9).addScaledVector(WORLD_UP, 1.15);
+      this.setCinematicCopy('ORBITAL SLINGSHOT', 'Charging the next worldâ€¦');
+    } else if (raw < 0.62) {
+      const beat = smoothstep((raw - 0.22) / 0.4);
+      cameraOffset
+        .addScaledVector(velocity, THREE.MathUtils.lerp(-15, -22, beat))
+        .addScaledVector(WORLD_UP, THREE.MathUtils.lerp(8, 18, beat))
+        .addScaledVector(orbitSide, THREE.MathUtils.lerp(8, 15, beat));
+      cameraTarget.copy(position).lerp(cinematic.start.clone().lerp(cinematic.end, 0.5), 0.24);
+      this.setCinematicCopy('STAR TRAIL', 'Crossing the interplanetary darkâ€¦');
+    } else {
+      const beat = smoothstep((raw - 0.62) / 0.38);
+      cameraOffset
+        .addScaledVector(velocity, THREE.MathUtils.lerp(-17, 4, beat))
+        .addScaledVector(WORLD_UP, THREE.MathUtils.lerp(13, 3.5, beat))
+        .addScaledVector(orbitSide, THREE.MathUtils.lerp(10, 3.2, beat));
+      cameraTarget.addScaledVector(velocity, THREE.MathUtils.lerp(5, 1.2, beat)).addScaledVector(WORLD_UP, 1.2);
+      this.setCinematicCopy('LANDING VECTOR', `${cinematic.destination.definition.name} ahead.`);
+    }
+    this.camera.position.lerp(position.clone().add(cameraOffset), 1 - Math.exp(-4.8 * delta));
     this.camera.up.copy(WORLD_UP);
     this.camera.lookAt(cameraTarget);
 
@@ -397,8 +466,103 @@ export class Game {
     this.cinematic = undefined;
     this.phase = 'playing';
     this.cinematicOverlay.classList.remove('is-active');
+    this.cinematicOverlay.classList.remove('is-defeat');
+    this.hud.classList.remove('is-hidden');
     this.audio.setCinematic(false);
     this.setStatus(`${this.activePlanet.definition.name} reached. The next route is all yours.`);
+  }
+
+  private beginDefeat(): void {
+    this.phase = 'defeat';
+    this.defeatCinematic = {
+      origin: this.playerPosition.clone(),
+      normal: this.playerNormal.clone(),
+      heading: this.playerHeading.clone(),
+      elapsed: 0,
+    };
+    this.defeatFx.visible = true;
+    this.cinematicOverlay.classList.add('is-active', 'is-defeat');
+    this.hud.classList.add('is-hidden');
+    this.setCinematicCopy('STARLIGHT DOWN', 'The rescue beacon is calling Nova home.');
+    this.audio.setCinematic(true);
+  }
+
+  private updateDefeat(delta: number): void {
+    const cinematic = this.defeatCinematic;
+    if (!cinematic) return;
+    cinematic.elapsed += delta;
+    const duration = 3.9;
+    const raw = THREE.MathUtils.clamp(cinematic.elapsed / duration, 0, 1);
+    const normal = cinematic.normal;
+    const heading = cinematic.heading;
+    const side = new THREE.Vector3().crossVectors(normal, heading).normalize();
+    if (side.lengthSq() < 0.001) side.set(1, 0, 0);
+
+    // Impact, weightless drift, then a soft beacon pull. The hero stays on
+    // screen for the entire beat so the loss reads as a character moment.
+    const impact = 1 - smoothstep(Math.min(1, raw / 0.2));
+    const drift = smoothstep(Math.min(1, Math.max(0, (raw - 0.16) / 0.56)));
+    const returnBeat = smoothstep(Math.min(1, Math.max(0, (raw - 0.72) / 0.28)));
+    const lift = THREE.MathUtils.lerp(0.12, 2.65, drift) * (1 - returnBeat * 0.42);
+    const shake = Math.sin(this.elapsed * 56) * impact * 0.08;
+    const position = cinematic.origin.clone()
+      .addScaledVector(normal, lift + shake)
+      .addScaledVector(side, Math.sin(this.elapsed * 8) * impact * 0.08);
+    this.hero.group.position.copy(position);
+    const facing = heading.clone().applyAxisAngle(normal, THREE.MathUtils.lerp(0, Math.PI * 1.35, drift));
+    this.hero.group.quaternion.copy(surfaceOrientation(normal, facing));
+    const scale = THREE.MathUtils.lerp(1.02, 0.72, returnBeat);
+    this.hero.group.scale.setScalar(scale);
+    this.hero.setRunCycle(0, this.elapsed, true);
+    this.hero.setHurt(raw < 0.52 && Math.floor(this.elapsed * 14) % 2 === 0);
+    if (raw < 0.48) this.setCharacterAnimation('hurt');
+
+    const fxPosition = this.activePlanet.worldPosition(normal, 0.12);
+    this.defeatFx.position.copy(fxPosition);
+    this.defeatFx.quaternion.copy(surfaceOrientation(normal, heading));
+    const ringPulse = 1 + Math.sin(this.elapsed * 7) * 0.12;
+    this.defeatRing.scale.setScalar(ringPulse + drift * 1.9);
+    this.defeatCore.scale.setScalar(1 + drift * 1.8);
+    this.defeatRingMaterial.opacity = THREE.MathUtils.clamp(0.16 + drift * 0.55 - returnBeat * 0.34, 0, 0.72);
+    this.defeatCoreMaterial.opacity = THREE.MathUtils.clamp(0.12 + drift * 0.5 - returnBeat * 0.42, 0, 0.7);
+
+    const cameraPosition = position.clone()
+      .addScaledVector(normal, THREE.MathUtils.lerp(5.7, 12.8, drift))
+      .addScaledVector(heading, THREE.MathUtils.lerp(3.8, -1.5, drift))
+      .addScaledVector(side, Math.sin(this.elapsed * 1.6) * THREE.MathUtils.lerp(0.8, 4.8, drift));
+    const cameraTarget = position.clone().addScaledVector(normal, 1.05);
+    this.camera.position.lerp(cameraPosition, 1 - Math.exp(-4.6 * delta));
+    this.camera.up.copy(WORLD_UP);
+    this.camera.lookAt(cameraTarget);
+
+    if (raw < 0.33) {
+      this.setCinematicCopy('STARLIGHT DOWN', 'Nova has fallen.');
+    } else if (raw < 0.76) {
+      this.setCinematicCopy('RESCUE BEACON', 'Hold on to the light.');
+    } else {
+      this.setCinematicCopy('REENTRY', 'The run continues.');
+    }
+
+    if (raw < 1) return;
+    this.health = 3;
+    this.hero.group.scale.setScalar(1);
+    this.defeatFx.visible = false;
+    this.defeatRingMaterial.opacity = 0;
+    this.defeatCoreMaterial.opacity = 0;
+    this.placePlayerAt(this.activePlanet, this.activePlanet.definition.startNormal);
+    this.defeatCinematic = undefined;
+    this.phase = 'playing';
+    this.cinematicOverlay.classList.remove('is-active', 'is-defeat');
+    this.hud.classList.remove('is-hidden');
+    this.audio.setCinematic(false);
+    this.setCharacterAnimation('idle');
+    this.setStatus('Rescue star restored you to the start beacon.');
+    this.updateUi();
+  }
+
+  private setCinematicCopy(title: string, subtitle: string): void {
+    this.cinematicTitle.textContent = title;
+    this.cinematicSubtitle.textContent = subtitle;
   }
 
   private updateTitleCamera(delta: number): void {
@@ -641,4 +805,9 @@ function quadraticBezier(start: THREE.Vector3, control: THREE.Vector3, end: THRE
   return start.clone().multiplyScalar(inverse * inverse)
     .addScaledVector(control, 2 * inverse * t)
     .addScaledVector(end, t * t);
+}
+
+function smoothstep(value: number): number {
+  const t = THREE.MathUtils.clamp(value, 0, 1);
+  return t * t * (3 - 2 * t);
 }
