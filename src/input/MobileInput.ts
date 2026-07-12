@@ -159,6 +159,13 @@ export class MobileInput {
     return !this.destroyed && (this.actionPointerId !== null || this.isKeyHeld('Space'));
   }
 
+  /** Fades the touch controls out of cinematic shots without destroying input state. */
+  setVisible(visible: boolean): void {
+    if (this.destroyed) return;
+    this.host.style.opacity = visible ? '1' : '0';
+    this.host.style.pointerEvents = visible ? 'auto' : 'none';
+  }
+
   /** Removes the overlay and every event listener. Safe to call more than once. */
   destroy(): void {
     if (this.destroyed) {

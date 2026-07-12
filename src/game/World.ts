@@ -15,6 +15,9 @@ export interface PlanetDefinition {
   launchNormal: THREE.Vector3;
   coins: number;
   enemies: number;
+  bossNormal?: THREE.Vector3;
+  bossHealth?: number;
+  relicRingTarget?: number;
 }
 
 export interface Coin {
@@ -28,6 +31,21 @@ export interface Enemy {
   readonly mesh: THREE.Group;
   defeated: boolean;
   defeatAge: number;
+}
+
+export interface PlanetBoss {
+  readonly normal: THREE.Vector3;
+  readonly mesh: THREE.Group;
+  readonly maxHealth: number;
+  health: number;
+  defeated: boolean;
+  defeatAge: number;
+}
+
+export interface PlanetRelic {
+  readonly normal: THREE.Vector3;
+  readonly mesh: THREE.Group;
+  collected: boolean;
 }
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -67,14 +85,17 @@ export const PLANET_DEFINITIONS: PlanetDefinition[] = [
     name: 'Aurora Crown',
     subtitle: 'The final radiant run',
     center: new THREE.Vector3(-32, 20, -48),
-    radius: 14,
+    radius: 18,
     primary: 0x635fd4,
     secondary: 0x9b8fff,
     atmosphere: 0xa7f7ff,
     startNormal: normalFromLatitudeLongitude(0.32, 2.2),
     launchNormal: normalFromLatitudeLongitude(-0.22, -0.45),
-    coins: 26,
-    enemies: 7,
+    coins: 36,
+    enemies: 9,
+    bossNormal: normalFromLatitudeLongitude(0.16, -1.18),
+    bossHealth: 5,
+    relicRingTarget: 23,
   },
 ];
 
@@ -201,6 +222,132 @@ function createEnemy(): THREE.Group {
   );
   antenna.position.y = 0.76;
   group.add(shell, visor, antenna);
+  return group;
+}
+
+function createBoss(): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'Aurora Crown Warden';
+
+  const armor = new THREE.MeshStandardMaterial({
+    color: 0x31256f,
+    emissive: 0x21104f,
+    emissiveIntensity: 1.05,
+    roughness: 0.3,
+    metalness: 0.7,
+  });
+  const armorHighlight = new THREE.MeshStandardMaterial({
+    color: 0x9e82ff,
+    emissive: 0x5c45ff,
+    emissiveIntensity: 1.4,
+    roughness: 0.2,
+    metalness: 0.55,
+  });
+  const coreMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffd7f6,
+    transparent: true,
+    opacity: 0.96,
+    blending: THREE.AdditiveBlending,
+  });
+
+  const body = new THREE.Mesh(new THREE.IcosahedronGeometry(1.42, 1), armor);
+  body.scale.set(1, 1.28, 0.9);
+  body.position.y = 1.55;
+  const core = new THREE.Mesh(new THREE.SphereGeometry(0.48, 16, 10), coreMaterial);
+  core.position.set(0, 1.62, 0.92);
+  const visorGeometry = new THREE.BoxGeometry(0.86, 0.2, 0.12);
+  const visorFront = new THREE.Mesh(visorGeometry, coreMaterial);
+  visorFront.position.set(0, 2.05, 1.08);
+  const visorBack = new THREE.Mesh(visorGeometry, coreMaterial);
+  visorBack.position.set(0, 2.05, -1.08);
+  const crown = new THREE.Mesh(new THREE.TorusGeometry(1.22, 0.13, 8, 32), armorHighlight);
+  crown.rotation.x = Math.PI / 2;
+  crown.position.y = 2.78;
+  const shoulderLeft = new THREE.Mesh(new THREE.ConeGeometry(0.38, 1.35, 6), armorHighlight);
+  shoulderLeft.position.set(-1.15, 1.58, 0);
+  shoulderLeft.rotation.z = -0.62;
+  const shoulderRight = shoulderLeft.clone();
+  shoulderRight.position.x = 1.15;
+  shoulderRight.rotation.z = 0.62;
+  const hornLeft = new THREE.Mesh(new THREE.ConeGeometry(0.22, 1.1, 5), armor);
+  hornLeft.position.set(-0.62, 2.85, 0);
+  hornLeft.rotation.z = -0.42;
+  const hornRight = hornLeft.clone();
+  hornRight.position.x = 0.62;
+  hornRight.rotation.z = 0.42;
+  const aura = new THREE.Mesh(
+    new THREE.TorusGeometry(1.95, 0.055, 8, 48),
+    new THREE.MeshBasicMaterial({
+      color: 0x8defff,
+      transparent: true,
+      opacity: 0.72,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }),
+  );
+  aura.rotation.x = Math.PI / 2;
+  aura.position.y = 1.35;
+  aura.name = 'boss-aura';
+  group.add(body, core, visorFront, visorBack, crown, shoulderLeft, shoulderRight, hornLeft, hornRight, aura);
+  return group;
+}
+
+function createBossArena(color: number): THREE.Group {
+  const group = new THREE.Group();
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(2.75, 0.075, 8, 48),
+    new THREE.MeshStandardMaterial({
+      color,
+      emissive: color,
+      emissiveIntensity: 1.4,
+      roughness: 0.2,
+      metalness: 0.55,
+    }),
+  );
+  ring.rotation.x = Math.PI / 2;
+  const inner = new THREE.Mesh(
+    new THREE.CircleGeometry(2.68, 40),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.11, side: THREE.DoubleSide }),
+  );
+  inner.rotation.x = -Math.PI / 2;
+  const pillarGeometry = new THREE.CylinderGeometry(0.06, 0.12, 1.65, 6);
+  const pillarMaterial = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.48 });
+  for (let index = 0; index < 4; index += 1) {
+    const pillar = new THREE.Mesh(pillarGeometry, pillarMaterial);
+    const angle = index * Math.PI / 2 + Math.PI / 4;
+    pillar.position.set(Math.cos(angle) * 2.2, 0.72, Math.sin(angle) * 2.2);
+    group.add(pillar);
+  }
+  group.add(ring, inner);
+  return group;
+}
+
+function createRelic(): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'Aurora Crown relic';
+  const crownMaterial = new THREE.MeshStandardMaterial({
+    color: 0xffe2a0,
+    emissive: 0xff9dff,
+    emissiveIntensity: 1.7,
+    roughness: 0.16,
+    metalness: 0.68,
+  });
+  const coreMaterial = new THREE.MeshBasicMaterial({
+    color: 0xc5f8ff,
+    transparent: true,
+    opacity: 0.95,
+    blending: THREE.AdditiveBlending,
+  });
+  const crown = new THREE.Mesh(new THREE.TorusGeometry(0.72, 0.13, 8, 28), crownMaterial);
+  crown.rotation.x = Math.PI / 2;
+  const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.38, 1), coreMaterial);
+  core.position.y = 0.18;
+  const beam = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.035, 0.22, 1.8, 8, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0x8defff, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending }),
+  );
+  beam.position.y = 0.9;
+  group.add(crown, core, beam);
   return group;
 }
 
@@ -447,8 +594,11 @@ export class Planet {
   readonly group = new THREE.Group();
   readonly coins: Coin[] = [];
   readonly enemies: Enemy[] = [];
+  readonly boss?: PlanetBoss;
+  readonly relic?: PlanetRelic;
   readonly launchPad: THREE.Group;
   readonly coinTarget: number;
+  readonly relicRingTarget: number;
 
   private readonly launchMaterial: THREE.MeshStandardMaterial;
   private elapsed = 0;
@@ -457,6 +607,7 @@ export class Planet {
     this.group.name = definition.name;
     this.group.position.copy(definition.center);
     this.coinTarget = Math.ceil(definition.coins * 0.58);
+    this.relicRingTarget = Math.min(definition.coins, definition.relicRingTarget ?? this.coinTarget);
     this.launchMaterial = new THREE.MeshStandardMaterial({
       color: definition.atmosphere,
       emissive: definition.atmosphere,
@@ -469,6 +620,31 @@ export class Planet {
     this.createDecorations();
     this.createCollectibles();
     this.createEnemies();
+    if (definition.bossNormal) {
+      const bossMesh = createBoss();
+      bossMesh.position.copy(definition.bossNormal).multiplyScalar(definition.radius + 0.58);
+      bossMesh.quaternion.copy(surfaceOrientation(definition.bossNormal));
+      this.boss = {
+        normal: definition.bossNormal.clone(),
+        mesh: bossMesh,
+        maxHealth: definition.bossHealth ?? 5,
+        health: definition.bossHealth ?? 5,
+        defeated: false,
+        defeatAge: 0,
+      };
+      const arena = createBossArena(definition.atmosphere);
+      arena.position.copy(definition.bossNormal).multiplyScalar(definition.radius + 0.14);
+      arena.quaternion.copy(surfaceOrientation(definition.bossNormal));
+      arena.name = 'boss arena';
+      this.group.add(arena, bossMesh);
+
+      const relicMesh = createRelic();
+      relicMesh.visible = false;
+      relicMesh.position.copy(definition.bossNormal).multiplyScalar(definition.radius + 1.1);
+      relicMesh.quaternion.copy(surfaceOrientation(definition.bossNormal));
+      this.relic = { normal: definition.bossNormal.clone(), mesh: relicMesh, collected: false };
+      this.group.add(relicMesh);
+    }
     this.launchPad = this.createLaunchPad();
     this.group.add(this.launchPad);
   }
@@ -478,7 +654,25 @@ export class Planet {
   }
 
   get isLaunchReady(): boolean {
-    return this.collectedCoins >= this.coinTarget;
+    return this.isBossPlanet ? this.relicCollected : this.collectedCoins >= this.coinTarget;
+  }
+
+  get isBossPlanet(): boolean {
+    return this.boss !== undefined;
+  }
+
+  get isBossDefeated(): boolean {
+    return this.boss?.defeated ?? false;
+  }
+
+  get isRelicReady(): boolean {
+    return this.relic !== undefined
+      && !this.relic.collected
+      && (this.isBossDefeated || this.collectedCoins >= this.relicRingTarget);
+  }
+
+  get relicCollected(): boolean {
+    return this.relic?.collected ?? false;
   }
 
   worldPosition(normal: THREE.Vector3, height = 0): THREE.Vector3 {
@@ -495,6 +689,28 @@ export class Planet {
 
   enemyNear(normal: THREE.Vector3, threshold = 1.36): Enemy | undefined {
     return this.enemies.find((candidate) => !candidate.defeated && arcDistance(candidate.normal, normal, this.definition.radius) < threshold);
+  }
+
+  bossNear(normal: THREE.Vector3, threshold = 2.45): PlanetBoss | undefined {
+    if (!this.boss || this.boss.defeated) return undefined;
+    return arcDistance(this.boss.normal, normal, this.definition.radius) < threshold ? this.boss : undefined;
+  }
+
+  damageBoss(amount = 1): boolean {
+    if (!this.boss || this.boss.defeated) return false;
+    this.boss.health = Math.max(0, this.boss.health - amount);
+    if (this.boss.health > 0) return false;
+    this.boss.defeated = true;
+    this.boss.defeatAge = 0;
+    return true;
+  }
+
+  collectRelicNear(normal: THREE.Vector3, threshold = 1.8): PlanetRelic | undefined {
+    if (!this.relic || !this.isRelicReady) return undefined;
+    if (arcDistance(this.relic.normal, normal, this.definition.radius) >= threshold) return undefined;
+    this.relic.collected = true;
+    this.relic.mesh.visible = false;
+    return this.relic;
   }
 
   isNearLaunch(normal: THREE.Vector3): boolean {
@@ -519,6 +735,28 @@ export class Planet {
       const bob = 0.16 + Math.sin(this.elapsed * 3.2 + enemy.normal.z * 11) * 0.11;
       enemy.mesh.position.copy(enemy.normal).multiplyScalar(this.definition.radius + 0.7 + bob);
       enemy.mesh.rotateY(delta * 0.8);
+    }
+    if (this.boss) {
+      if (this.boss.defeated) {
+        this.boss.defeatAge += delta;
+        const collapse = Math.max(0, 1 - this.boss.defeatAge * 1.35);
+        this.boss.mesh.scale.setScalar(collapse);
+        this.boss.mesh.rotation.y += delta * 2.4;
+      } else {
+        const bob = Math.sin(this.elapsed * 2.4) * 0.18;
+        this.boss.mesh.position.copy(this.boss.normal).multiplyScalar(this.definition.radius + 0.58 + bob);
+        this.boss.mesh.rotateY(delta * 0.45);
+        const aura = this.boss.mesh.getObjectByName('boss-aura');
+        if (aura) aura.rotation.z += delta * 1.8;
+      }
+    }
+    if (this.relic) {
+      this.relic.mesh.visible = this.isRelicReady;
+      if (this.relic.mesh.visible) {
+        this.relic.mesh.rotation.y += delta * 1.8;
+        const pulse = 1 + Math.sin(this.elapsed * 5.5) * 0.1;
+        this.relic.mesh.scale.setScalar(pulse);
+      }
     }
     const launchPulse = this.isLaunchReady ? 1.35 + Math.sin(this.elapsed * 5) * 0.45 : 0.38;
     this.launchMaterial.emissiveIntensity = launchPulse;
@@ -570,6 +808,7 @@ export class Planet {
     const primary = new THREE.Color(this.definition.primary);
     const secondary = new THREE.Color(this.definition.secondary);
     const noBuildZones = [this.definition.startNormal, this.definition.launchNormal];
+    if (this.definition.bossNormal) noBuildZones.push(this.definition.bossNormal);
     const rockPlacements: Array<{ normal: THREE.Vector3; scale: number }> = [];
     const crystalPlacements: Array<{ normal: THREE.Vector3; scale: number }> = [];
     for (let index = 0; index < 34; index += 1) {
@@ -650,6 +889,9 @@ export class Planet {
       if (arcDistance(normal, this.definition.startNormal, this.definition.radius) < 2.1) {
         normal = normalFromLatitudeLongitude(normal.y * 0.5, Math.atan2(normal.z, normal.x) + 0.62);
       }
+      if (this.definition.bossNormal && arcDistance(normal, this.definition.bossNormal, this.definition.radius) < 3.2) {
+        normal = normalFromLatitudeLongitude(normal.y * 0.5, Math.atan2(normal.z, normal.x) + 0.82);
+      }
       const mesh = createCoin();
       mesh.position.copy(normal).multiplyScalar(this.definition.radius + 0.72);
       mesh.quaternion.copy(surfaceOrientation(normal));
@@ -660,10 +902,13 @@ export class Planet {
 
   private createEnemies(): void {
     for (let index = 0; index < this.definition.enemies; index += 1) {
-      const normal = normalFromLatitudeLongitude(
+      let normal = normalFromLatitudeLongitude(
         -0.66 + deterministic(index * 43 + this.definition.center.x) * 1.32,
         deterministic(index * 47 + this.definition.radius) * Math.PI * 2,
       );
+      if (this.definition.bossNormal && arcDistance(normal, this.definition.bossNormal, this.definition.radius) < 3.6) {
+        normal = normalFromLatitudeLongitude(normal.y * 0.5, Math.atan2(normal.z, normal.x) + 0.9);
+      }
       const mesh = createEnemy();
       mesh.position.copy(normal).multiplyScalar(this.definition.radius + 0.85);
       mesh.quaternion.copy(surfaceOrientation(normal));

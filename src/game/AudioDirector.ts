@@ -16,6 +16,7 @@ export class AudioDirector {
   private musicSource: string | undefined;
   private muted = false;
   private usingAssetMusic = false;
+  private bossThemeActive = false;
 
   start(): void {
     if (!this.context) {
@@ -34,6 +35,34 @@ export class AudioDirector {
   setCinematic(active: boolean): void {
     if (!this.context) return;
     this.setMusicTrack(active ? 'cinematic' : 'gameplay');
+  }
+
+  /** Switches to a procedural boss motif so the final encounter needs no extra audio payload. */
+  setBossTheme(active: boolean): void {
+    if (!this.context || !this.musicGain) return;
+    if (active) {
+      if (this.bossThemeActive) return;
+      this.bossThemeActive = true;
+      this.music?.pause();
+      this.music = undefined;
+      this.musicSource = 'boss-synth';
+      this.usingAssetMusic = true;
+      if (this.loopTimer !== undefined) {
+        window.clearTimeout(this.loopTimer);
+        this.loopTimer = undefined;
+      }
+      this.scheduleBossMusic();
+      return;
+    }
+    if (!this.bossThemeActive) return;
+    this.bossThemeActive = false;
+    if (this.loopTimer !== undefined) {
+      window.clearTimeout(this.loopTimer);
+      this.loopTimer = undefined;
+    }
+    this.musicSource = undefined;
+    this.usingAssetMusic = false;
+    this.setMusicTrack('gameplay');
   }
 
   toggleMute(): boolean {
@@ -137,6 +166,24 @@ export class AudioDirector {
       }
     }
     this.loopTimer = window.setTimeout(() => this.scheduleMusic(), 6400);
+  }
+
+  private scheduleBossMusic(): void {
+    if (!this.context || !this.musicGain || !this.bossThemeActive) return;
+    const now = this.context.currentTime + 0.08;
+    const phrase = [
+      [110, 0], [130.81, 0.28], [164.81, 0.56], [146.83, 0.84],
+      [110, 1.12], [98, 1.4], [123.47, 1.68], [146.83, 1.96],
+      [110, 2.24], [130.81, 2.52], [164.81, 2.8], [196, 3.08],
+      [164.81, 3.36], [146.83, 3.64], [123.47, 3.92], [98, 4.2],
+      [110, 4.48], [164.81, 4.76], [220, 5.04],
+    ] as const;
+    for (const [frequency, offset] of phrase) {
+      this.tone(frequency, frequency * 0.985, 0.22, 'sawtooth', 0.045, now + offset, this.musicGain);
+      this.tone(frequency * 2, frequency * 1.92, 0.12, 'triangle', 0.025, now + offset + 0.04, this.musicGain);
+    }
+    this.tone(55, 55, 5.25, 'sine', 0.055, now, this.musicGain);
+    this.loopTimer = window.setTimeout(() => this.scheduleBossMusic(), 5600);
   }
 
   private tone(start: number, end: number, length: number, type: OscillatorType, volume: number, when: number, destination: AudioNode): void {

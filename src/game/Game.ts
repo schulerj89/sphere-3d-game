@@ -11,7 +11,7 @@ import {
 } from './World';
 import { MobileInput } from '../input/MobileInput';
 
-type GamePhase = 'title' | 'playing' | 'cinematic' | 'defeat' | 'complete';
+type GamePhase = 'title' | 'playing' | 'cinematic' | 'defeat' | 'bossVictory' | 'complete';
 
 interface LaunchCinematic {
   readonly source: Planet;
@@ -28,6 +28,12 @@ interface DefeatCinematic {
   elapsed: number;
 }
 
+interface BossVictoryCinematic {
+  readonly origin: THREE.Vector3;
+  readonly normal: THREE.Vector3;
+  elapsed: number;
+}
+
 interface StarboundDebugSnapshot {
   readonly phase: GamePhase;
   readonly currentPlanet: string;
@@ -37,6 +43,13 @@ interface StarboundDebugSnapshot {
   readonly planetsCompleted: number;
   readonly loadedAssetIds: readonly string[];
   readonly assetErrors: readonly string[];
+  readonly boss?: {
+    readonly health: number;
+    readonly maxHealth: number;
+    readonly defeated: boolean;
+    readonly relicReady: boolean;
+    readonly relicCollected: boolean;
+  };
   readonly renderer: {
     readonly calls: number;
     readonly triangles: number;
@@ -96,6 +109,7 @@ export class Game {
   private phase: GamePhase = 'title';
   private cinematic: LaunchCinematic | undefined;
   private defeatCinematic: DefeatCinematic | undefined;
+  private bossVictoryCinematic: BossVictoryCinematic | undefined;
   private elapsed = 0;
   private lastFrameTimestamp = performance.now();
   private playerHeight = 0;
@@ -115,7 +129,7 @@ export class Game {
   private animationLockedUntil = 0;
   private characterReady = false;
   private loadingStartedAt = 0;
-  private readonly loadedAssetIds = ['procedural-planets', 'procedural-hero'];
+  private readonly loadedAssetIds = ['procedural-planets', 'procedural-boss', 'procedural-hero'];
   private readonly assetErrors: string[] = [];
 
   private loadingScreen!: HTMLElement;
@@ -127,6 +141,9 @@ export class Game {
   private completeScreen!: HTMLElement;
   private planetName!: HTMLElement;
   private missionText!: HTMLElement;
+  private bossCard!: HTMLElement;
+  private bossMeterFill!: HTMLElement;
+  private bossMeterText!: HTMLElement;
   private coinText!: HTMLElement;
   private healthText!: HTMLElement;
   private statusText!: HTMLElement;
@@ -155,6 +172,9 @@ export class Game {
     this.completeScreen = this.element('.complete-screen');
     this.planetName = this.element('.hud-planet');
     this.missionText = this.element('.mission-copy');
+    this.bossCard = this.element('.boss-card');
+    this.bossMeterFill = this.element('.boss-meter-fill');
+    this.bossMeterText = this.element('.boss-meter-text');
     this.coinText = this.element('.coin-count');
     this.healthText = this.element('.health-count');
     this.statusText = this.element('.status-copy');
@@ -223,6 +243,7 @@ export class Game {
     this.hero.triggerWeaponAnimation('equip', this.elapsed);
     this.input = new MobileInput({ mount: document.body, joystickRadius: 61 });
     this.setStatus('Find bright star tokens, then stand in the launch halo and press JUMP.');
+    this.configureQaScenario();
     this.updateUi();
   };
 
@@ -243,6 +264,8 @@ export class Game {
       this.updateCinematic(delta);
     } else if (this.phase === 'defeat') {
       this.updateDefeat(delta);
+    } else if (this.phase === 'bossVictory') {
+      this.updateBossVictory(delta);
     } else if (this.phase === 'title') {
       this.updateTitleCamera(delta);
     } else {
@@ -268,6 +291,10 @@ export class Game {
         this.audio.play('jump');
         this.triggerAnimation('jumpStart', 0.24);
         this.setStatus('Arc high enough to pounce on a Voidling.');
+      } else if (this.activePlanet.isBossPlanet && this.activePlanet.isNearLaunch(this.playerNormal) && !this.activePlanet.isLaunchReady) {
+        this.setStatus(this.activePlanet.isRelicReady
+          ? 'The Aurora Crown is still waiting at the Warden arena.'
+          : 'The final launch halo answers only to the Aurora Crown.');
       } else if (this.activePlanet.isNearLaunch(this.playerNormal) && !this.activePlanet.isLaunchReady) {
         this.setStatus(`Launch halo needs ${this.activePlanet.coinTarget - this.activePlanet.collectedCoins} more star tokens.`);
       }
@@ -348,8 +375,48 @@ export class Game {
     if (collected) {
       this.coins += 1;
       this.audio.play('coin');
-      const remaining = Math.max(0, this.activePlanet.coinTarget - this.activePlanet.collectedCoins);
-      this.setStatus(remaining === 0 ? 'Launch halo charged! Stand inside and press JUMP.' : `${remaining} more star tokens to charge the launch halo.`);
+      if (this.activePlanet.isBossPlanet) {
+        const remaining = Math.max(0, this.activePlanet.relicRingTarget - this.activePlanet.collectedCoins);
+        this.setStatus(remaining === 0
+          ? 'Aurora Crown awakened! Find the relic at the Warden arena.'
+          : `${remaining} more rings to awaken the Aurora Crown.`);
+      } else {
+        const remaining = Math.max(0, this.activePlanet.coinTarget - this.activePlanet.collectedCoins);
+        this.setStatus(remaining === 0 ? 'Launch halo charged! Stand inside and press JUMP.' : `${remaining} more star tokens to charge the launch halo.`);
+      }
+    }
+
+    const relic = this.activePlanet.collectRelicNear(this.playerNormal);
+    if (relic) {
+      this.audio.play('complete');
+      this.beginBossVictory();
+      return;
+    }
+
+    const boss = this.activePlanet.bossNear(this.playerNormal);
+    if (boss) {
+      if (this.playerHeight > 0.72 && this.verticalVelocity < 0) {
+        const defeated = this.activePlanet.damageBoss();
+        this.verticalVelocity = 10.2;
+        this.audio.play('pounce');
+        this.triggerAnimation('pounce', 0.52);
+        this.setStatus(defeated
+          ? 'The Crown Warden falls! Collect the Aurora Crown.'
+          : `Crown Warden struck! ${boss.health}/${boss.maxHealth} armor remaining.`);
+        return;
+      }
+      if (this.invulnerability > 0 || this.playerHeight > 0.45) return;
+      this.health -= 1;
+      this.invulnerability = 1.25;
+      this.verticalVelocity = 6.8;
+      this.audio.play('hit');
+      this.triggerAnimation('hurt', 0.4);
+      if (this.health <= 0) {
+        this.beginDefeat();
+      } else {
+        this.setStatus('The Crown Warden is charged with starlight. Pounce from above.');
+      }
+      return;
     }
 
     const enemy = this.activePlanet.enemyNear(this.playerNormal);
@@ -381,6 +448,7 @@ export class Game {
     const destination = this.planets[planetIndex + 1];
     if (!destination) {
       this.phase = 'complete';
+      this.audio.setBossTheme(false);
       this.audio.play('complete');
       this.triggerAnimation('celebrate', 1.1);
       this.hud.classList.add('is-hidden');
@@ -398,6 +466,7 @@ export class Game {
     this.cinematicOverlay.classList.add('is-active');
     this.cinematicOverlay.classList.remove('is-defeat');
     this.hud.classList.add('is-hidden');
+    this.input?.setVisible(false);
     this.setCinematicCopy('ORBITAL SLINGSHOT', 'Hold tight, runner.');
     this.audio.play('launch');
     this.audio.setCinematic(true);
@@ -468,7 +537,9 @@ export class Game {
     this.cinematicOverlay.classList.remove('is-active');
     this.cinematicOverlay.classList.remove('is-defeat');
     this.hud.classList.remove('is-hidden');
+    this.input?.setVisible(true);
     this.audio.setCinematic(false);
+    this.audio.setBossTheme(this.activePlanet.isBossPlanet);
     this.setStatus(`${this.activePlanet.definition.name} reached. The next route is all yours.`);
   }
 
@@ -483,7 +554,9 @@ export class Game {
     this.defeatFx.visible = true;
     this.cinematicOverlay.classList.add('is-active', 'is-defeat');
     this.hud.classList.add('is-hidden');
+    this.input?.setVisible(false);
     this.setCinematicCopy('STARLIGHT DOWN', 'The rescue beacon is calling Nova home.');
+    this.audio.setBossTheme(false);
     this.audio.setCinematic(true);
   }
 
@@ -554,15 +627,103 @@ export class Game {
     this.phase = 'playing';
     this.cinematicOverlay.classList.remove('is-active', 'is-defeat');
     this.hud.classList.remove('is-hidden');
+    this.input?.setVisible(true);
     this.audio.setCinematic(false);
+    this.audio.setBossTheme(this.activePlanet.isBossPlanet);
     this.setCharacterAnimation('idle');
     this.setStatus('Rescue star restored you to the start beacon.');
+    this.updateUi();
+  }
+
+  private beginBossVictory(): void {
+    this.phase = 'bossVictory';
+    this.bossVictoryCinematic = {
+      origin: this.playerPosition.clone(),
+      normal: this.playerNormal.clone(),
+      elapsed: 0,
+    };
+    this.hud.classList.add('is-hidden');
+    this.cinematicOverlay.classList.add('is-active', 'is-boss-victory');
+    this.input?.setVisible(false);
+    this.cinematicOverlay.classList.remove('is-defeat');
+    this.setCinematicCopy('AURORA CROWN', 'Dance beneath the final light.');
+    this.audio.setBossTheme(false);
+    this.audio.setCinematic(true);
+    this.triggerAnimation('celebrate', 5.8);
+  }
+
+  private updateBossVictory(delta: number): void {
+    const cinematic = this.bossVictoryCinematic;
+    if (!cinematic) return;
+    cinematic.elapsed += delta;
+    const duration = 5.8;
+    const raw = THREE.MathUtils.clamp(cinematic.elapsed / duration, 0, 1);
+    const beat = smoothstep(raw);
+    const normal = cinematic.normal;
+    const side = new THREE.Vector3().crossVectors(normal, this.playerHeading).normalize();
+    if (side.lengthSq() < 0.001) side.set(1, 0, 0);
+    const position = cinematic.origin.clone().addScaledVector(normal, 0.28 + Math.sin(this.elapsed * 3.2) * 0.08);
+    this.hero.group.position.copy(position);
+    this.hero.group.quaternion.copy(surfaceOrientation(normal, this.playerHeading));
+    this.hero.setRunCycle(0, this.elapsed, false);
+
+    const orbit = this.elapsed * 0.9;
+    const cameraPosition = position.clone()
+      .addScaledVector(normal, THREE.MathUtils.lerp(9.2, 11.4, beat))
+      .addScaledVector(side, Math.sin(orbit) * THREE.MathUtils.lerp(2.6, 4.6, beat))
+      .addScaledVector(this.playerHeading, 7.6 + Math.cos(orbit) * 2.2);
+    const cameraTarget = position.clone().addScaledVector(normal, 1.35);
+    this.camera.position.lerp(cameraPosition, 1 - Math.exp(-4.6 * delta));
+    this.camera.up.copy(WORLD_UP);
+    this.camera.lookAt(cameraTarget);
+
+    if (raw < 0.34) {
+      this.setCinematicCopy('AURORA CROWN', 'The Warden yields to Nova.');
+    } else if (raw < 0.78) {
+      this.setCinematicCopy('CROWN OF LIGHT', 'Dance beneath the final light.');
+    } else {
+      this.setCinematicCopy('STARBOUND CHAMPION', 'The galaxy remembers this run.');
+    }
+
+    if (raw < 1) return;
+    this.bossVictoryCinematic = undefined;
+    this.phase = 'complete';
+    this.hero.group.scale.setScalar(1);
+    this.cinematicOverlay.classList.remove('is-active', 'is-boss-victory');
+    this.hud.classList.add('is-hidden');
+    this.audio.setCinematic(false);
+    this.completeScreen.classList.remove('is-hidden');
     this.updateUi();
   }
 
   private setCinematicCopy(title: string, subtitle: string): void {
     this.cinematicTitle.textContent = title;
     this.cinematicSubtitle.textContent = subtitle;
+  }
+
+  private configureQaScenario(): void {
+    if (!import.meta.env.DEV) return;
+    const scenario = new URLSearchParams(window.location.search).get('qa');
+    if (scenario !== 'boss' && scenario !== 'victory') return;
+    const finalPlanet = this.planets[this.planets.length - 1];
+    if (!finalPlanet?.definition.bossNormal) return;
+    this.activePlanet = finalPlanet;
+    for (const planet of this.planets) planet.group.visible = planet === finalPlanet;
+    const arenaNormal = finalPlanet.definition.bossNormal;
+    const offsetAxis = new THREE.Vector3().crossVectors(arenaNormal, WORLD_UP).normalize();
+    if (offsetAxis.lengthSq() < 0.001) offsetAxis.set(1, 0, 0);
+    const playerNormal = arenaNormal.clone().applyAxisAngle(offsetAxis, -0.34).normalize();
+    this.placePlayerAt(finalPlanet, playerNormal);
+    this.playerHeading.copy(arenaNormal).projectOnPlane(playerNormal).normalize();
+    this.cameraHeading.copy(this.playerHeading);
+    this.hero.group.quaternion.copy(surfaceOrientation(this.playerNormal, this.playerHeading));
+    this.cameraDistance = 13;
+    this.audio.setBossTheme(true);
+    this.setStatus(scenario === 'boss' ? 'QA boss arena: pounce the Crown Warden.' : 'QA victory cinematic: Crown relic claimed.');
+    if (scenario !== 'victory' || !finalPlanet.boss) return;
+    finalPlanet.damageBoss(finalPlanet.boss.health);
+    finalPlanet.collectRelicNear(arenaNormal, 4);
+    this.beginBossVictory();
   }
 
   private updateTitleCamera(delta: number): void {
@@ -625,6 +786,24 @@ export class Game {
     this.missionText.textContent = planet.isLaunchReady
       ? 'Launch halo charged — stand inside it and press JUMP.'
       : `Charge the launch halo: ${remaining} star token${remaining === 1 ? '' : 's'} remaining.`;
+    if (planet.isBossPlanet) {
+      const remaining = Math.max(0, planet.relicRingTarget - planet.collectedCoins);
+      this.missionText.textContent = planet.relicCollected
+        ? 'Aurora Crown claimed - Nova is the Starbound Champion.'
+        : planet.isRelicReady
+          ? 'Aurora Crown awakened - collect the relic at the Warden arena.'
+          : `Defeat the Crown Warden or collect ${remaining} more ring${remaining === 1 ? '' : 's'}.`;
+    }
+    if (planet.isBossPlanet && planet.boss) {
+      this.bossCard.classList.remove('is-hidden');
+      const healthRatio = planet.boss.health / planet.boss.maxHealth;
+      this.bossMeterFill.style.width = `${Math.round(healthRatio * 100)}%`;
+      this.bossMeterText.textContent = planet.boss.defeated
+        ? 'WARDEN DEFEATED'
+        : `${planet.boss.health}/${planet.boss.maxHealth} ARMOR`;
+    } else {
+      this.bossCard.classList.add('is-hidden');
+    }
     if (window.location.search.includes('debug=1')) {
       this.debugText.classList.add('is-visible');
       const info = this.renderer.info;
@@ -647,6 +826,15 @@ export class Game {
       planetsCompleted: this.planets.indexOf(this.activePlanet),
       loadedAssetIds: this.loadedAssetIds,
       assetErrors: this.assetErrors,
+      boss: this.activePlanet.boss
+        ? {
+          health: this.activePlanet.boss.health,
+          maxHealth: this.activePlanet.boss.maxHealth,
+          defeated: this.activePlanet.boss.defeated,
+          relicReady: this.activePlanet.isRelicReady,
+          relicCollected: this.activePlanet.relicCollected,
+        }
+        : undefined,
       renderer: {
         calls: info.render.calls,
         triangles: info.render.triangles,
@@ -776,6 +964,7 @@ export class Game {
           <div class="hud-stats"><span class="coin-count"></span><span class="health-count"></span></div>
           <button class="mute-button" type="button" aria-pressed="false">SOUND ON</button>
           <section class="mission-card"><span class="mission-label">OBJECTIVE</span><p class="mission-copy"></p></section>
+          <section class="boss-card is-hidden" aria-live="polite"><div class="boss-card-heading"><span class="mission-label">CROWN WARDEN</span><strong class="boss-meter-text"></strong></div><div class="boss-meter"><i class="boss-meter-fill"></i></div></section>
           <p class="status-copy"></p>
           <p class="debug-panel" aria-live="off"></p>
         </header>
@@ -791,9 +980,9 @@ export class Game {
           </div>
         </section>
         <section class="complete-screen is-hidden">
-          <p class="eyebrow">DEMO COMPLETE</p>
-          <h2>YOU RAN THE <span>STARS.</span></h2>
-          <p>Three worlds charted, ${'${this.coins}'} star tokens gathered, and a whole galaxy still waiting.</p>
+          <p class="eyebrow">FINAL ORBIT COMPLETE</p>
+          <h2>THE <span>AURORA CROWN</span> IS YOURS.</h2>
+          <p>Three worlds charted, ${this.coins} rings gathered, and the Crown Warden's light now follows Nova.</p>
           <button class="restart-button" type="button">RUN IT AGAIN</button>
         </section>
       </section>`;
