@@ -45,6 +45,7 @@ declare global {
 }
 
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
+const DEFAULT_CAMERA_DISTANCE = 20;
 const assetPath = (path: string): string => `${import.meta.env.BASE_URL}${path}`;
 
 export class Game {
@@ -54,6 +55,9 @@ export class Game {
   private readonly hero: HeroVisual = createHeroVisual();
   private readonly playerNormal = new THREE.Vector3();
   private readonly playerHeading = new THREE.Vector3(0, 0, 1);
+  // This stays independent from playerHeading so a D-pad turn is visible
+  // instead of the follow camera rotating with Nova and hiding the turn.
+  private readonly cameraHeading = new THREE.Vector3(0, 0, 1);
   private readonly playerPosition = new THREE.Vector3();
   private readonly cameraPosition = new THREE.Vector3();
   private readonly lookAtTarget = new THREE.Vector3();
@@ -70,9 +74,8 @@ export class Game {
   private lastFrameTimestamp = performance.now();
   private playerHeight = 0;
   private verticalVelocity = 0;
-  private cameraYaw = 0.2;
   private cameraPitch = 0.34;
-  private cameraDistance = 15.5;
+  private cameraDistance = DEFAULT_CAMERA_DISTANCE;
   private health = 3;
   private coins = 0;
   private defeatedEnemies = 0;
@@ -233,10 +236,21 @@ export class Game {
     if (speed > 0) {
       const axis = new THREE.Vector3().crossVectors(this.playerNormal, desired).normalize();
       const distance = speed * delta;
-      this.playerNormal.applyAxisAngle(axis, distance / this.activePlanet.definition.radius).normalize();
-      this.playerHeading.applyAxisAngle(axis, distance / this.activePlanet.definition.radius).projectOnPlane(this.playerNormal).normalize();
+      const surfaceRotation = distance / this.activePlanet.definition.radius;
+      this.playerNormal.applyAxisAngle(axis, surfaceRotation).normalize();
+      this.playerHeading.applyAxisAngle(axis, surfaceRotation).projectOnPlane(this.playerNormal).normalize();
+      this.cameraHeading.applyAxisAngle(axis, surfaceRotation).projectOnPlane(this.playerNormal).normalize();
       const targetHeading = desired.clone().projectOnPlane(this.playerNormal).normalize();
-      this.playerHeading.lerp(targetHeading, 1 - Math.exp(-13 * delta)).projectOnPlane(this.playerNormal).normalize();
+      const turnAngle = this.playerHeading.angleTo(targetHeading);
+      if (turnAngle > 0.0001) {
+        const turnAxis = new THREE.Vector3().crossVectors(this.playerHeading, targetHeading);
+        // Opposite directions have no cross product; choose a stable turn on
+        // the current surface instead of letting the heading collapse to zero.
+        if (turnAxis.lengthSq() < 0.0001) turnAxis.copy(this.playerNormal);
+        else turnAxis.normalize();
+        this.playerHeading.applyAxisAngle(turnAxis, Math.min(16 * delta, turnAngle));
+      }
+      this.playerHeading.projectOnPlane(this.playerNormal).normalize();
     }
 
     this.verticalVelocity -= 27 * delta;
@@ -261,14 +275,16 @@ export class Game {
   private updateCameraInput(): void {
     if (!this.input) return;
     const look = this.input.consumeLookDelta();
-    this.cameraYaw -= look.x * 0.006;
+    if (look.x !== 0) {
+      this.cameraHeading.applyAxisAngle(this.playerNormal, -look.x * 0.006).projectOnPlane(this.playerNormal).normalize();
+    }
     this.cameraPitch = THREE.MathUtils.clamp(this.cameraPitch - look.y * 0.004, 0.09, 0.85);
     this.cameraDistance = THREE.MathUtils.clamp(this.cameraDistance - this.input.consumeZoomDelta() * 0.023, 8.5, 23);
   }
 
   private cameraRelativeMovement(x: number, y: number): THREE.Vector3 {
     if (x === 0 && y === 0) return new THREE.Vector3();
-    const cameraForward = this.playerHeading.clone().applyAxisAngle(this.playerNormal, this.cameraYaw).projectOnPlane(this.playerNormal).normalize();
+    const cameraForward = this.cameraHeading.clone().projectOnPlane(this.playerNormal).normalize();
     const right = new THREE.Vector3().crossVectors(this.playerNormal, cameraForward).normalize();
     return cameraForward.multiplyScalar(y).addScaledVector(right, x).normalize();
   }
@@ -368,8 +384,7 @@ export class Game {
     if (raw < 1) return;
     this.activePlanet = cinematic.destination;
     this.placePlayerAt(this.activePlanet, this.activePlanet.definition.startNormal);
-    this.cameraYaw = 0.18;
-    this.cameraDistance = 15.5;
+    this.cameraDistance = DEFAULT_CAMERA_DISTANCE;
     this.cinematic = undefined;
     this.phase = 'playing';
     this.cinematicOverlay.classList.remove('is-active');
@@ -399,7 +414,7 @@ export class Game {
   }
 
   private updateCamera(delta: number): void {
-    const forward = this.playerHeading.clone().applyAxisAngle(this.playerNormal, this.cameraYaw).projectOnPlane(this.playerNormal).normalize();
+    const forward = this.cameraHeading.clone().projectOnPlane(this.playerNormal).normalize();
     const horizontalDistance = this.cameraDistance * Math.cos(this.cameraPitch);
     const verticalDistance = this.cameraDistance * Math.sin(this.cameraPitch);
     const desired = this.playerPosition.clone()
@@ -417,6 +432,7 @@ export class Game {
     this.playerHeading.set(0, 0, 1).projectOnPlane(this.playerNormal);
     if (this.playerHeading.lengthSq() < 0.001) this.playerHeading.set(1, 0, 0).projectOnPlane(this.playerNormal);
     this.playerHeading.normalize();
+    this.cameraHeading.copy(this.playerHeading).applyAxisAngle(this.playerNormal, 0.18).projectOnPlane(this.playerNormal).normalize();
     this.playerHeight = 0;
     this.verticalVelocity = 0;
     this.playerPosition.copy(planet.worldPosition(this.playerNormal, 0.08));
