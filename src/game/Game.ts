@@ -290,9 +290,11 @@ export class Game {
 
   private cameraRelativeMovement(x: number, y: number): THREE.Vector3 {
     if (x === 0 && y === 0) return new THREE.Vector3();
-    const cameraForward = this.cameraHeading.clone().projectOnPlane(this.playerNormal).normalize();
-    const right = new THREE.Vector3().crossVectors(this.playerNormal, cameraForward).normalize();
-    return cameraForward.multiplyScalar(y).addScaledVector(right, x).normalize();
+    const cameraToward = this.cameraHeading.clone().projectOnPlane(this.playerNormal).normalize();
+    const right = new THREE.Vector3().crossVectors(this.playerNormal, cameraToward).normalize();
+    // cameraToward points from Nova toward the lead camera. Screen-up/Forward
+    // must travel away from that camera; keep horizontal right/left unchanged.
+    return cameraToward.multiplyScalar(-y).addScaledVector(right, x).normalize();
   }
 
   private updatePlayerVisual(speed: number, airborne: boolean): void {
