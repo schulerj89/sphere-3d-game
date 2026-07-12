@@ -439,6 +439,7 @@ export class Planet {
 export interface HeroVisual {
   readonly group: THREE.Group;
   attachModel(model: THREE.Object3D): void;
+  showFallback(): void;
   setRunCycle(speed: number, elapsed: number, airborne: boolean): void;
   setHurt(active: boolean): void;
 }
@@ -448,6 +449,9 @@ export function createHeroVisual(): HeroVisual {
   group.name = 'Nova, the Star Runner';
   const fallback = new THREE.Group();
   fallback.name = 'procedural player fallback';
+  // Keep the placeholder out of sight while the authored character is loading.
+  // It is revealed only if the shipped model cannot be loaded.
+  fallback.visible = false;
   group.add(fallback);
   const suit = new THREE.MeshStandardMaterial({
     color: 0xeff8ff,
@@ -509,6 +513,9 @@ export function createHeroVisual(): HeroVisual {
     attachModel(model: THREE.Object3D): void {
       fallback.visible = false;
       group.add(model);
+    },
+    showFallback(): void {
+      fallback.visible = true;
     },
     setRunCycle(speed: number, elapsed: number, airborne: boolean): void {
       const amount = Math.min(1, speed / 8);

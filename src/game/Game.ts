@@ -46,6 +46,7 @@ declare global {
 
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
 const DEFAULT_CAMERA_DISTANCE = 20;
+const MINIMUM_LOADING_SCREEN_DURATION = 650;
 const assetPath = (path: string): string => `${import.meta.env.BASE_URL}${path}`;
 
 export class Game {
@@ -87,9 +88,12 @@ export class Game {
   private activeAnimation: THREE.AnimationAction | undefined;
   private readonly modelActions = new Map<string, THREE.AnimationAction>();
   private animationLockedUntil = 0;
+  private characterReady = false;
+  private loadingStartedAt = 0;
   private readonly loadedAssetIds = ['procedural-planets', 'procedural-hero'];
   private readonly assetErrors: string[] = [];
 
+  private loadingScreen!: HTMLElement;
   private titleScreen!: HTMLElement;
   private hud!: HTMLElement;
   private cinematicOverlay!: HTMLElement;
@@ -105,6 +109,7 @@ export class Game {
   constructor(private readonly root: HTMLDivElement) {}
 
   start(): void {
+    this.loadingStartedAt = performance.now();
     this.root.innerHTML = this.template();
     const canvas = this.element<HTMLCanvasElement>('.game-canvas');
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
@@ -114,6 +119,7 @@ export class Game {
     this.renderer.toneMappingExposure = 1.12;
     this.renderer.setAnimationLoop(this.tick);
 
+    this.loadingScreen = this.element('.loading-screen');
     this.titleScreen = this.element('.title-screen');
     this.hud = this.element('.hud');
     this.cinematicOverlay = this.element('.cinematic-overlay');
@@ -130,6 +136,7 @@ export class Game {
     this.bindUi();
     this.resize();
     this.updateUi();
+    void this.loadCharacterModel().then(this.finishLoading);
     window.addEventListener('resize', this.resize);
     window.__starboundDebug = () => this.debugSnapshot();
   }
@@ -162,7 +169,6 @@ export class Game {
     this.camera.position.set(24, 19, 26);
     this.cameraPosition.copy(this.camera.position);
     this.camera.lookAt(this.activePlanet.definition.center);
-    this.loadCharacterModel();
   }
 
   private bindUi(): void {
@@ -176,7 +182,7 @@ export class Game {
   }
 
   private readonly begin = (): void => {
-    if (this.phase !== 'title') return;
+    if (this.phase !== 'title' || !this.characterReady) return;
     this.phase = 'playing';
     this.titleScreen.classList.add('is-hidden');
     this.hud.classList.remove('is-hidden');
@@ -419,7 +425,10 @@ export class Game {
     const verticalDistance = this.cameraDistance * Math.sin(this.cameraPitch);
     const desired = this.playerPosition.clone()
       .addScaledVector(this.playerNormal, verticalDistance + 1.2)
-      .addScaledVector(forward, -horizontalDistance);
+      // Nova's authored +Z face matches the movement heading. Keep the
+      // follow camera on the lead side so forward motion does not read as a
+      // backwards-running model from the player's view.
+      .addScaledVector(forward, horizontalDistance);
     this.cameraPosition.lerp(desired, 1 - Math.exp(-8 * delta));
     this.camera.position.copy(this.cameraPosition);
     this.camera.up.copy(this.playerNormal);
@@ -488,52 +497,74 @@ export class Game {
     this.renderer.setSize(width, height, false);
   };
 
-  private loadCharacterModel(): void {
-    void import('three/addons/loaders/GLTFLoader.js').then(({ GLTFLoader }) => {
+  private async loadCharacterModel(): Promise<void> {
+    try {
+      const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
       const loader = new GLTFLoader();
-      loader.load(
-        assetPath('assets/characters/kaykit-rogue.glb'),
-        (gltf) => {
-          try {
-            const model = gltf.scene;
-            model.traverse((node) => {
-              if (node instanceof THREE.Mesh) {
-                node.castShadow = false;
-                node.receiveShadow = false;
+      await new Promise<void>((resolve) => {
+        loader.load(
+          assetPath('assets/characters/kaykit-rogue.glb'),
+          (gltf) => {
+            try {
+              const model = gltf.scene;
+              model.traverse((node) => {
+                if (node instanceof THREE.Mesh) {
+                  node.castShadow = false;
+                  node.receiveShadow = false;
+                }
+              });
+              const sourceBounds = new THREE.Box3().setFromObject(model);
+              const sourceHeight = sourceBounds.getSize(new THREE.Vector3()).y;
+              model.scale.setScalar(2.52 / Math.max(0.001, sourceHeight));
+              const scaledBounds = new THREE.Box3().setFromObject(model);
+              model.position.y = -scaledBounds.min.y;
+              // The KayKit rig already faces +Z, which is the game movement axis.
+              this.hero.attachModel(model);
+              this.modelMixer = new THREE.AnimationMixer(model);
+              const aliases: Record<string, string> = {
+                idle: 'Idle',
+                run: 'Running_A',
+                jumpStart: 'Jump_Start',
+                jumpAir: 'Jump_Full_Long',
+                pounce: 'Unarmed_Melee_Attack_Kick',
+                hurt: 'Hit_A',
+                celebrate: 'Cheer',
+              };
+              for (const [name, clipName] of Object.entries(aliases)) {
+                const clip = THREE.AnimationClip.findByName(gltf.animations, clipName);
+                if (clip) this.modelActions.set(name, this.modelMixer.clipAction(clip));
               }
-            });
-            const sourceBounds = new THREE.Box3().setFromObject(model);
-            const sourceHeight = sourceBounds.getSize(new THREE.Vector3()).y;
-            model.scale.setScalar(2.52 / Math.max(0.001, sourceHeight));
-            const scaledBounds = new THREE.Box3().setFromObject(model);
-            model.position.y = -scaledBounds.min.y;
-            model.rotation.y = Math.PI;
-            this.hero.attachModel(model);
-            this.modelMixer = new THREE.AnimationMixer(model);
-            const aliases: Record<string, string> = {
-              idle: 'Idle',
-              run: 'Running_A',
-              jumpStart: 'Jump_Start',
-              jumpAir: 'Jump_Full_Long',
-              pounce: 'Unarmed_Melee_Attack_Kick',
-              hurt: 'Hit_A',
-              celebrate: 'Cheer',
-            };
-            for (const [name, clipName] of Object.entries(aliases)) {
-              const clip = THREE.AnimationClip.findByName(gltf.animations, clipName);
-              if (clip) this.modelActions.set(name, this.modelMixer.clipAction(clip));
+              this.loadedAssetIds.push('kaykit-rogue');
+              this.setCharacterAnimation('idle');
+            } catch (error) {
+              this.assetErrors.push(`kaykit-rogue: ${error instanceof Error ? error.message : String(error)}`);
+              this.hero.showFallback();
             }
-            this.loadedAssetIds.push('kaykit-rogue');
-            this.setCharacterAnimation('idle');
-          } catch (error) {
-            this.assetErrors.push(`kaykit-rogue: ${error instanceof Error ? error.message : String(error)}`);
-          }
-        },
-        undefined,
-        () => this.assetErrors.push('kaykit-rogue: failed to load; using the procedural hero'),
-      );
-    }).catch(() => this.assetErrors.push('kaykit-rogue: loader failed to initialize; using the procedural hero'));
+            resolve();
+          },
+          undefined,
+          () => {
+            this.assetErrors.push('kaykit-rogue: failed to load; using the procedural hero');
+            this.hero.showFallback();
+            resolve();
+          },
+        );
+      });
+    } catch {
+      this.assetErrors.push('kaykit-rogue: loader failed to initialize; using the procedural hero');
+      this.hero.showFallback();
+    }
   }
+
+  private readonly finishLoading = async (): Promise<void> => {
+    const remaining = MINIMUM_LOADING_SCREEN_DURATION - (performance.now() - this.loadingStartedAt);
+    if (remaining > 0) {
+      await new Promise<void>((resolve) => window.setTimeout(resolve, remaining));
+    }
+    this.characterReady = true;
+    this.titleScreen.classList.remove('is-hidden');
+    this.loadingScreen.classList.add('is-hidden');
+  };
 
   private triggerAnimation(name: string, duration: number): void {
     this.animationLockedUntil = this.elapsed + duration;
@@ -562,6 +593,13 @@ export class Game {
       <section class="game-shell" aria-label="Starbound Sprint game">
         <canvas class="game-canvas" aria-label="Starbound Sprint 3D world"></canvas>
         <div class="screen-vignette" aria-hidden="true"></div>
+        <section class="loading-screen" aria-label="Loading Starbound Sprint" aria-live="polite">
+          <div class="loading-content">
+            <p class="eyebrow">PREPARING YOUR RUN</p>
+            <div class="loading-orbit" aria-hidden="true"><span></span></div>
+            <p>Loading Nova and her gear&hellip;</p>
+          </div>
+        </section>
         <header class="hud is-hidden" aria-live="polite">
           <div class="hud-brand"><span>STARBOUND</span><b>SPRINT</b></div>
           <div class="hud-route"><span class="route-label">CURRENT ORBIT</span><strong class="hud-planet"></strong></div>
@@ -572,7 +610,7 @@ export class Game {
           <p class="debug-panel" aria-live="off"></p>
         </header>
         <section class="cinematic-overlay" aria-live="assertive"><p>ORBITAL SLINGSHOT</p><span>Hold tight, runner.</span></section>
-        <section class="title-screen">
+        <section class="title-screen is-hidden">
           <div class="title-orbit orbit-one"></div><div class="title-orbit orbit-two"></div>
           <div class="title-content">
             <p class="eyebrow">A MOBILE COSMIC PLATFORMER</p>

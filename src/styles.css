@@ -27,6 +27,104 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+.harness-shell,
+.harness-canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.harness-shell {
+  overflow: hidden;
+  background: #020514;
+  isolation: isolate;
+}
+
+.harness-canvas { display: block; width: 100%; height: 100%; }
+
+.harness-panel {
+  position: absolute;
+  z-index: 2;
+  top: max(20px, env(safe-area-inset-top));
+  left: 50%;
+  width: min(610px, calc(100vw - 32px));
+  padding: 17px 21px 15px;
+  transform: translateX(-50%);
+  border: 1px solid rgba(141, 224, 255, 0.3);
+  border-radius: 16px;
+  background: rgba(4, 16, 43, 0.8);
+  box-shadow: 0 14px 38px rgba(0, 0, 17, 0.32), inset 0 0 24px rgba(78, 181, 255, 0.08);
+  backdrop-filter: blur(9px);
+  text-align: center;
+}
+
+.harness-kicker {
+  margin: 0 0 5px;
+  color: #8fd9ff;
+  font-size: 0.57rem;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+}
+
+.harness-panel h1 {
+  margin: 0;
+  color: #fff8cf;
+  font-family: 'Bungee', Impact, sans-serif;
+  font-size: clamp(1.25rem, 4vw, 2rem);
+  font-weight: 400;
+  letter-spacing: 0.04em;
+}
+
+.harness-copy {
+  max-width: 540px;
+  margin: 8px auto 10px;
+  color: #d6efff;
+  font-size: clamp(0.63rem, 1.8vw, 0.78rem);
+  line-height: 1.4;
+}
+
+.harness-legend {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  color: #e9f8ff;
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.harness-legend span { display: inline-flex; align-items: center; gap: 6px; }
+
+.harness-swatch {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.harness-swatch-move { background: #6ee7ff; box-shadow: 0 0 10px #6ee7ff; }
+.harness-swatch-model { background: #ffcb66; box-shadow: 0 0 10px #ffcb66; }
+
+.harness-status {
+  margin: 9px 0 0;
+  color: #b7d8ed;
+  font-size: 0.62rem;
+  font-weight: 600;
+}
+
+.harness-rig-label {
+  position: absolute;
+  z-index: 2;
+  bottom: 20%;
+  color: #fff3b0;
+  font-size: clamp(0.72rem, 2vw, 0.9rem);
+  font-weight: 800;
+  letter-spacing: 0.11em;
+  text-shadow: 0 2px 8px #001020;
+}
+
+.harness-rig-label-left { left: 25%; transform: translateX(-50%); }
+.harness-rig-label-right { right: 25%; transform: translateX(50%); }
+
 button {
   font: inherit;
 }
@@ -209,6 +307,7 @@ button {
 
 .debug-panel.is-visible { display: block; }
 
+.loading-screen,
 .title-screen,
 .complete-screen {
   position: absolute;
@@ -224,6 +323,70 @@ button {
   transition: opacity 500ms ease, visibility 500ms ease, transform 600ms cubic-bezier(.2,.8,.2,1);
 }
 
+.loading-screen {
+  z-index: 60;
+  background:
+    radial-gradient(ellipse at 50% 46%, rgba(57, 147, 255, 0.18), transparent 38%),
+    radial-gradient(ellipse at 50% 48%, #071d45 0%, #020718 54%, #01030b 100%);
+}
+
+.loading-content {
+  display: grid;
+  justify-items: center;
+  gap: 16px;
+  color: #effbff;
+  text-align: center;
+}
+
+.loading-content > p:last-child {
+  margin: 0;
+  color: #c8ecff;
+  font-size: clamp(0.72rem, 2vw, 0.9rem);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.loading-orbit {
+  position: relative;
+  width: 92px;
+  aspect-ratio: 1;
+  border: 2px solid rgba(155, 231, 255, 0.28);
+  border-radius: 50%;
+  box-shadow: inset 0 0 22px rgba(90, 205, 255, 0.2), 0 0 34px rgba(92, 188, 255, 0.16);
+  animation: loading-spin 1.2s linear infinite;
+}
+
+.loading-orbit::before,
+.loading-orbit::after,
+.loading-orbit span {
+  position: absolute;
+  border-radius: 50%;
+  content: '';
+}
+
+.loading-orbit::before {
+  top: -7px;
+  left: 50%;
+  width: 13px;
+  height: 13px;
+  transform: translateX(-50%);
+  background: #fff4a3;
+  box-shadow: 0 0 14px #fff4a3;
+}
+
+.loading-orbit::after {
+  inset: 22px;
+  border: 2px solid #78e6ff;
+  box-shadow: 0 0 18px rgba(120, 230, 255, 0.72);
+}
+
+.loading-orbit span {
+  inset: 36px;
+  background: #f49f55;
+  box-shadow: 0 0 15px rgba(244, 159, 85, 0.85);
+}
+
+.loading-screen.is-hidden,
 .title-screen.is-hidden {
   opacity: 0;
   visibility: hidden;
@@ -389,6 +552,10 @@ button {
 @keyframes orbit-drift {
   from { rotate: 0deg; }
   to { rotate: 360deg; }
+}
+
+@keyframes loading-spin {
+  to { transform: rotate(360deg); }
 }
 
 @media (max-width: 600px) {

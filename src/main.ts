@@ -7,4 +7,10 @@ if (!app) {
   throw new Error('Starbound Sprint could not find its application root.');
 }
 
-new Game(app).start();
+if (new URLSearchParams(window.location.search).get('harness') === 'orientation') {
+  void import('./harness/CharacterOrientationHarness').then(({ CharacterOrientationHarness }) => {
+    new CharacterOrientationHarness(app).start();
+  });
+} else {
+  new Game(app).start();
+}
