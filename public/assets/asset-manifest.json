@@ -23,10 +23,11 @@
         "jumpStart": "Jump_Start",
         "jumpAir": "Jump_Full_Long",
         "jumpLand": "Jump_Land",
-        "pounce": "Unarmed_Melee_Attack_Kick",
+        "pounce": "1H_Melee_Attack_Slice_Horizontal",
         "hurt": "Hit_A",
         "celebrate": "Cheer"
       },
+      "weaponLoadout": ["1H_Crossbow", "Knife_Offhand"],
       "validated": {
         "glbVersion": 2,
         "skins": 1,

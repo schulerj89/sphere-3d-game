@@ -436,12 +436,28 @@ export class Planet {
   }
 }
 
+export type HeroWeaponAnimation = 'equip' | 'attack';
+
+interface WeaponPose {
+  readonly object: THREE.Object3D;
+  readonly position: THREE.Vector3;
+  readonly quaternion: THREE.Quaternion;
+  readonly scale: THREE.Vector3;
+  readonly equipPosition: THREE.Vector3;
+  readonly equipQuaternion: THREE.Quaternion;
+  readonly equipScale: THREE.Vector3;
+}
+
+const HERO_WEAPON_LOADOUT = new Set(['1H_Crossbow', 'Knife_Offhand']);
+const HERO_HIDDEN_WEAPONS = new Set(['2H_Crossbow', 'Knife', 'Throwable']);
+
 export interface HeroVisual {
   readonly group: THREE.Group;
   attachModel(model: THREE.Object3D): void;
   showFallback(): void;
   setRunCycle(speed: number, elapsed: number, airborne: boolean): void;
   setHurt(active: boolean): void;
+  triggerWeaponAnimation(animation: HeroWeaponAnimation, elapsed: number): void;
 }
 
 export function createHeroVisual(): HeroVisual {
@@ -508,11 +524,77 @@ export function createHeroVisual(): HeroVisual {
   }
   fallback.add(body, helmet, visorMesh, pack, core);
 
+  // The source rogue ships every hand-slot prop in the same scene. Keep a
+  // readable two-piece loadout (crossbow + offhand knife), and animate those
+  // props independently so equip/attack beats remain visible even when the
+  // authored arm clips are cross-faded.
+  let weaponPoses: WeaponPose[] = [];
+  let weaponAnimation: { kind: HeroWeaponAnimation; start: number; duration: number } | undefined;
+  const weaponEquipOffset = new THREE.Vector3(0, 0.14, -0.05);
+  const weaponRecoil = new THREE.Quaternion();
+  const weaponRecoilAxis = new THREE.Vector3(0, 1, 0);
+
+  const updateWeaponAnimation = (elapsed: number): void => {
+    if (!weaponAnimation) return;
+    const progress = THREE.MathUtils.clamp((elapsed - weaponAnimation.start) / weaponAnimation.duration, 0, 1);
+    if (weaponAnimation.kind === 'equip') {
+      const eased = 1 - Math.pow(1 - progress, 3);
+      for (const pose of weaponPoses) {
+        pose.object.position.lerpVectors(pose.equipPosition, pose.position, eased);
+        pose.object.quaternion.copy(pose.equipQuaternion).slerp(pose.quaternion, eased);
+        pose.object.scale.lerpVectors(pose.equipScale, pose.scale, eased);
+      }
+    } else {
+      // The 1H attack clip drives the arms. This secondary hand-local recoil
+      // gives both retained weapons a readable impact without changing the
+      // source GLB or introducing another weapon mesh.
+      const pulse = Math.sin(progress * Math.PI);
+      for (const pose of weaponPoses) {
+        pose.object.position.copy(pose.position);
+        pose.object.position.z -= pulse * 0.075;
+        pose.object.position.x += (pose.object.name === 'Knife_Offhand' ? -1 : 1) * pulse * 0.035;
+        weaponRecoil.setFromAxisAngle(weaponRecoilAxis, pulse * 0.24);
+        pose.object.quaternion.copy(pose.quaternion).multiply(weaponRecoil);
+        pose.object.scale.copy(pose.scale);
+      }
+    }
+    if (progress >= 1) {
+      for (const pose of weaponPoses) {
+        pose.object.position.copy(pose.position);
+        pose.object.quaternion.copy(pose.quaternion);
+        pose.object.scale.copy(pose.scale);
+      }
+      weaponAnimation = undefined;
+    }
+  };
+
   return {
     group,
     attachModel(model: THREE.Object3D): void {
       fallback.visible = false;
+      weaponPoses = [];
+      model.traverse((node) => {
+        if (HERO_HIDDEN_WEAPONS.has(node.name)) {
+          node.visible = false;
+          return;
+        }
+        if (!HERO_WEAPON_LOADOUT.has(node.name)) return;
+        const pose: WeaponPose = {
+          object: node,
+          position: node.position.clone(),
+          quaternion: node.quaternion.clone(),
+          scale: node.scale.clone(),
+          // Start just above the hand and nearly collapsed. triggerWeaponAnimation
+          // will reveal the loadout with an intentional equip beat.
+          equipPosition: node.position.clone().add(weaponEquipOffset),
+          equipQuaternion: node.quaternion.clone(),
+          equipScale: node.scale.clone().multiplyScalar(0.08),
+        };
+        weaponPoses.push(pose);
+        node.visible = true;
+      });
       group.add(model);
+      weaponAnimation = undefined;
     },
     showFallback(): void {
       fallback.visible = true;
@@ -525,10 +607,32 @@ export function createHeroVisual(): HeroVisual {
       leftArm.rotation.x = airborne ? 0.55 : -swing * 0.8;
       rightArm.rotation.x = airborne ? -0.55 : swing * 0.8;
       body.position.y = 1.1 + (airborne ? 0.03 : Math.abs(swing) * 0.05);
+      updateWeaponAnimation(elapsed);
     },
     setHurt(active: boolean): void {
       visor.emissiveIntensity = active ? 0.35 : 1.7;
       suitAccent.emissiveIntensity = active ? 2.2 : 0.8;
+    },
+    triggerWeaponAnimation(animation: HeroWeaponAnimation, elapsed: number): void {
+      if (weaponPoses.length === 0) return;
+      if (animation === 'equip') {
+        for (const pose of weaponPoses) {
+          pose.object.position.copy(pose.equipPosition);
+          pose.object.quaternion.copy(pose.equipQuaternion);
+          pose.object.scale.copy(pose.equipScale);
+        }
+      } else {
+        for (const pose of weaponPoses) {
+          pose.object.position.copy(pose.position);
+          pose.object.quaternion.copy(pose.quaternion);
+          pose.object.scale.copy(pose.scale);
+        }
+      }
+      weaponAnimation = {
+        kind: animation,
+        start: elapsed,
+        duration: animation === 'equip' ? 0.72 : 0.54,
+      };
     },
   };
 }
