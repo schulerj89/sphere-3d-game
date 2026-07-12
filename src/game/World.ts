@@ -110,33 +110,43 @@ function colorForSurface(primary: THREE.Color, secondary: THREE.Color, normal: T
   return primary.clone().lerp(secondary, light * 0.75);
 }
 
-function addCrystal(parent: THREE.Group, normal: THREE.Vector3, radius: number, color: THREE.Color, scale: number): void {
-  const crystal = new THREE.Mesh(
-    new THREE.ConeGeometry(0.38, 1.7, 5),
-    new THREE.MeshStandardMaterial({
-      color,
-      emissive: color,
-      emissiveIntensity: 0.45,
-      roughness: 0.32,
-      metalness: 0.2,
-    }),
-  );
-  crystal.scale.setScalar(scale);
-  crystal.position.copy(normal).multiplyScalar(radius + 0.55 * scale);
-  crystal.quaternion.copy(surfaceOrientation(normal));
-  crystal.rotateX(-Math.PI / 2);
-  parent.add(crystal);
+function surfaceNormalQuaternion(normal: THREE.Vector3): THREE.Quaternion {
+  return new THREE.Quaternion().setFromUnitVectors(FORWARD, normal);
 }
 
-function addRock(parent: THREE.Group, normal: THREE.Vector3, radius: number, color: THREE.Color, scale: number): void {
-  const rock = new THREE.Mesh(
-    new THREE.DodecahedronGeometry(0.85, 0),
-    new THREE.MeshStandardMaterial({ color, roughness: 0.95, flatShading: true }),
-  );
-  rock.position.copy(normal).multiplyScalar(radius + 0.36 * scale);
-  rock.quaternion.copy(surfaceOrientation(normal));
-  rock.scale.set(scale, scale * 0.65, scale * 0.8);
-  parent.add(rock);
+function createOrbitRing(
+  radius: number,
+  tube: number,
+  color: number,
+  emissive: number,
+  opacity = 1,
+): THREE.Mesh {
+  const material = new THREE.MeshStandardMaterial({
+    color,
+    emissive,
+    emissiveIntensity: 0.8,
+    roughness: 0.3,
+    metalness: 0.45,
+    transparent: opacity < 1,
+    opacity,
+    depthWrite: opacity >= 1,
+  });
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(radius, tube, 8, 72), material);
+  ring.rotation.x = Math.PI / 2;
+  return ring;
+}
+
+function createLatitudeBand(
+  radius: number,
+  latitude: number,
+  color: number,
+  emissive: number,
+  opacity = 1,
+): THREE.Mesh {
+  const bandRadius = Math.max(0.5, radius * Math.cos(latitude));
+  const band = createOrbitRing(bandRadius, 0.055, color, emissive, opacity);
+  band.position.y = radius * Math.sin(latitude);
+  return band;
 }
 
 function createCoin(): THREE.Group {
@@ -244,6 +254,195 @@ function createCloudMaterial(color: number): THREE.SpriteMaterial {
   });
 }
 
+function createLumaLandmarks(parent: THREE.Group, radius: number): void {
+  const gardenRing = createOrbitRing(radius + 0.08, 0.09, 0x77f6c6, 0x1dba9d, 0.9);
+  gardenRing.rotation.z = 0.2;
+  parent.add(gardenRing);
+
+  const stemGeometry = new THREE.CylinderGeometry(0.08, 0.14, 1.18, 6);
+  const stemMaterial = new THREE.MeshStandardMaterial({
+    color: 0x2f9c76,
+    roughness: 0.72,
+    metalness: 0.08,
+  });
+  const petalGeometry = new THREE.ConeGeometry(0.28, 0.68, 5);
+  const petalMaterial = new THREE.MeshStandardMaterial({
+    color: 0xc2ffe2,
+    emissive: 0x55ffd0,
+    emissiveIntensity: 1.1,
+    roughness: 0.28,
+    metalness: 0.12,
+  });
+  const normals = [
+    normalFromLatitudeLongitude(0.36, -1.7),
+    normalFromLatitudeLongitude(0.18, -0.7),
+    normalFromLatitudeLongitude(-0.06, 0.15),
+    normalFromLatitudeLongitude(-0.24, 1.05),
+    normalFromLatitudeLongitude(0.44, 2.05),
+    normalFromLatitudeLongitude(-0.4, 2.72),
+    normalFromLatitudeLongitude(0.08, -2.55),
+    normalFromLatitudeLongitude(-0.15, -2.0),
+  ];
+  const stems = new THREE.InstancedMesh(stemGeometry, stemMaterial, normals.length);
+  const petals = new THREE.InstancedMesh(petalGeometry, petalMaterial, normals.length);
+  const dummy = new THREE.Object3D();
+  normals.forEach((normal, index) => {
+    const scale = 0.62 + deterministic(index * 23 + radius) * 0.48;
+    dummy.position.copy(normal).multiplyScalar(radius + 0.62 * scale);
+    dummy.quaternion.copy(surfaceOrientation(normal));
+    dummy.scale.setScalar(scale);
+    dummy.updateMatrix();
+    stems.setMatrixAt(index, dummy.matrix);
+
+    dummy.position.copy(normal).multiplyScalar(radius + 1.27 * scale);
+    dummy.scale.setScalar(scale * 0.88);
+    dummy.updateMatrix();
+    petals.setMatrixAt(index, dummy.matrix);
+  });
+  stems.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+  petals.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+  stems.computeBoundingSphere();
+  petals.computeBoundingSphere();
+  parent.add(stems, petals);
+}
+
+function createCinderLandmarks(parent: THREE.Group, radius: number): void {
+  const circuitRing = createOrbitRing(radius + 0.12, 0.1, 0xff8c4b, 0xb72e1d, 0.92);
+  circuitRing.rotation.z = -0.26;
+  parent.add(circuitRing);
+  parent.add(createLatitudeBand(radius + 0.04, 0.34, 0xffd17a, 0xff4d27, 0.42));
+
+  const craterNormals = [
+    normalFromLatitudeLongitude(0.48, -0.72),
+    normalFromLatitudeLongitude(0.14, 0.62),
+    normalFromLatitudeLongitude(-0.2, 2.25),
+    normalFromLatitudeLongitude(-0.48, -2.32),
+    normalFromLatitudeLongitude(0.02, -2.55),
+  ];
+  const rimGeometry = new THREE.TorusGeometry(1, 0.13, 6, 28);
+  const rimMaterial = new THREE.MeshStandardMaterial({
+    color: 0x492530,
+    emissive: 0x4d1e23,
+    emissiveIntensity: 0.8,
+    roughness: 0.92,
+    metalness: 0.12,
+  });
+  const floorGeometry = new THREE.CircleGeometry(0.88, 24);
+  const floorMaterial = new THREE.MeshStandardMaterial({
+    color: 0x25152a,
+    emissive: 0x7d291d,
+    emissiveIntensity: 0.9,
+    roughness: 0.8,
+    metalness: 0.08,
+    side: THREE.DoubleSide,
+  });
+  const rims = new THREE.InstancedMesh(rimGeometry, rimMaterial, craterNormals.length);
+  const floors = new THREE.InstancedMesh(floorGeometry, floorMaterial, craterNormals.length);
+  const dummy = new THREE.Object3D();
+  craterNormals.forEach((normal, index) => {
+    const scale = 0.72 + deterministic(index * 29 + radius) * 0.7;
+    dummy.position.copy(normal).multiplyScalar(radius + 0.08);
+    dummy.quaternion.copy(surfaceNormalQuaternion(normal));
+    dummy.scale.setScalar(scale);
+    dummy.updateMatrix();
+    rims.setMatrixAt(index, dummy.matrix);
+    dummy.position.copy(normal).multiplyScalar(radius + 0.06);
+    dummy.scale.setScalar(scale * 0.9);
+    dummy.updateMatrix();
+    floors.setMatrixAt(index, dummy.matrix);
+  });
+  rims.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+  floors.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+  rims.computeBoundingSphere();
+  floors.computeBoundingSphere();
+  parent.add(rims, floors);
+
+  const ventGeometry = new THREE.ConeGeometry(0.12, 0.8, 5);
+  const ventMaterial = new THREE.MeshStandardMaterial({
+    color: 0xffa45e,
+    emissive: 0xff3d1d,
+    emissiveIntensity: 1.5,
+    roughness: 0.34,
+    metalness: 0.35,
+  });
+  const vents = new THREE.InstancedMesh(ventGeometry, ventMaterial, 7);
+  for (let index = 0; index < 7; index += 1) {
+    const normal = normalFromLatitudeLongitude(
+      -0.3 + deterministic(index * 67 + radius) * 0.9,
+      deterministic(index * 71 + radius) * Math.PI * 2,
+    );
+    dummy.position.copy(normal).multiplyScalar(radius + 0.55);
+    dummy.quaternion.copy(surfaceOrientation(normal));
+    dummy.scale.setScalar(0.6 + deterministic(index * 73) * 0.45);
+    dummy.updateMatrix();
+    vents.setMatrixAt(index, dummy.matrix);
+  }
+  vents.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+  vents.computeBoundingSphere();
+  parent.add(vents);
+}
+
+function createAuroraLandmarks(parent: THREE.Group, radius: number): void {
+  const cap = new THREE.Mesh(
+    new THREE.SphereGeometry(radius + 0.12, 24, 12, 0, Math.PI * 2, 0, 0.52),
+    new THREE.MeshStandardMaterial({
+      color: 0xe3fcff,
+      emissive: 0x6ed9ff,
+      emissiveIntensity: 0.75,
+      roughness: 0.38,
+      metalness: 0.2,
+      transparent: true,
+      opacity: 0.78,
+    }),
+  );
+  parent.add(cap);
+  parent.add(createLatitudeBand(radius + 0.1, 0.28, 0x7ef5ff, 0x34d9ff, 0.65));
+  parent.add(createLatitudeBand(radius + 0.1, 0.46, 0xb1a4ff, 0x725dff, 0.48));
+  parent.add(createLatitudeBand(radius + 0.1, -0.34, 0x7ef5ff, 0x34d9ff, 0.42));
+
+  const auroraRing = createOrbitRing(radius + 0.3, 0.065, 0x8defff, 0x3d76ff, 0.75);
+  auroraRing.rotation.z = 0.36;
+  parent.add(auroraRing);
+
+  const shardGeometry = new THREE.ConeGeometry(0.2, 1.45, 5);
+  const shardMaterial = new THREE.MeshStandardMaterial({
+    color: 0xd2ccff,
+    emissive: 0x665eff,
+    emissiveIntensity: 0.95,
+    roughness: 0.25,
+    metalness: 0.42,
+  });
+  const shardNormals = [
+    normalFromLatitudeLongitude(0.58, -1.6),
+    normalFromLatitudeLongitude(0.4, -0.2),
+    normalFromLatitudeLongitude(0.18, 1.05),
+    normalFromLatitudeLongitude(-0.05, 2.0),
+    normalFromLatitudeLongitude(-0.34, 2.8),
+    normalFromLatitudeLongitude(-0.55, -2.4),
+    normalFromLatitudeLongitude(0.02, -2.6),
+    normalFromLatitudeLongitude(0.26, -2.1),
+  ];
+  const shards = new THREE.InstancedMesh(shardGeometry, shardMaterial, shardNormals.length);
+  const dummy = new THREE.Object3D();
+  shardNormals.forEach((normal, index) => {
+    const scale = 0.62 + deterministic(index * 83 + radius) * 0.55;
+    dummy.position.copy(normal).multiplyScalar(radius + 0.64 * scale);
+    dummy.quaternion.copy(surfaceOrientation(normal));
+    dummy.scale.set(scale, scale * 1.28, scale);
+    dummy.updateMatrix();
+    shards.setMatrixAt(index, dummy.matrix);
+  });
+  shards.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+  shards.computeBoundingSphere();
+  parent.add(shards);
+}
+
+function createSurfaceLandmarks(parent: THREE.Group, definition: PlanetDefinition): void {
+  if (definition.id === 'luma') createLumaLandmarks(parent, definition.radius);
+  if (definition.id === 'cinder') createCinderLandmarks(parent, definition.radius);
+  if (definition.id === 'aurora') createAuroraLandmarks(parent, definition.radius);
+}
+
 export class Planet {
   readonly group = new THREE.Group();
   readonly coins: Coin[] = [];
@@ -266,6 +465,7 @@ export class Planet {
       metalness: 0.6,
     });
     this.createSurface();
+    createSurfaceLandmarks(this.group, definition);
     this.createDecorations();
     this.createCollectibles();
     this.createEnemies();
@@ -370,7 +570,9 @@ export class Planet {
     const primary = new THREE.Color(this.definition.primary);
     const secondary = new THREE.Color(this.definition.secondary);
     const noBuildZones = [this.definition.startNormal, this.definition.launchNormal];
-    for (let index = 0; index < 42; index += 1) {
+    const rockPlacements: Array<{ normal: THREE.Vector3; scale: number }> = [];
+    const crystalPlacements: Array<{ normal: THREE.Vector3; scale: number }> = [];
+    for (let index = 0; index < 34; index += 1) {
       const normal = normalFromLatitudeLongitude(
         -0.92 + deterministic(index * 5 + this.definition.radius) * 1.84,
         deterministic(index * 7 + this.definition.center.x) * Math.PI * 2,
@@ -378,11 +580,53 @@ export class Planet {
       if (noBuildZones.some((zone) => arcDistance(zone, normal, this.definition.radius) < 2.5)) continue;
       const scale = 0.45 + deterministic(index * 13) * 0.85;
       if (index % 3 === 0) {
-        addCrystal(this.group, normal, this.definition.radius, primary.clone().lerp(secondary, deterministic(index * 17)), scale);
+        crystalPlacements.push({ normal, scale });
       } else {
-        addRock(this.group, normal, this.definition.radius, primary.clone().multiplyScalar(0.5 + deterministic(index) * 0.4), scale);
+        rockPlacements.push({ normal, scale });
       }
     }
+
+    const dummy = new THREE.Object3D();
+    const rockMesh = new THREE.InstancedMesh(
+      new THREE.DodecahedronGeometry(0.85, 0),
+      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, flatShading: true }),
+      rockPlacements.length,
+    );
+    rockPlacements.forEach(({ normal, scale }, index) => {
+      dummy.position.copy(normal).multiplyScalar(this.definition.radius + 0.36 * scale);
+      dummy.quaternion.copy(surfaceOrientation(normal));
+      dummy.scale.set(scale, scale * 0.65, scale * 0.8);
+      dummy.updateMatrix();
+      rockMesh.setMatrixAt(index, dummy.matrix);
+      rockMesh.setColorAt(index, primary.clone().multiplyScalar(0.5 + deterministic(index) * 0.4));
+    });
+    rockMesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+    rockMesh.instanceColor?.setUsage(THREE.StaticDrawUsage);
+    rockMesh.computeBoundingSphere();
+
+    const crystalMesh = new THREE.InstancedMesh(
+      new THREE.ConeGeometry(0.38, 1.7, 5),
+      new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        emissive: 0xffffff,
+        emissiveIntensity: 0.45,
+        roughness: 0.32,
+        metalness: 0.2,
+      }),
+      crystalPlacements.length,
+    );
+    crystalPlacements.forEach(({ normal, scale }, index) => {
+      dummy.position.copy(normal).multiplyScalar(this.definition.radius + 0.55 * scale);
+      dummy.quaternion.copy(surfaceOrientation(normal));
+      dummy.scale.setScalar(scale);
+      dummy.updateMatrix();
+      crystalMesh.setMatrixAt(index, dummy.matrix);
+      crystalMesh.setColorAt(index, primary.clone().lerp(secondary, deterministic(index * 17)));
+    });
+    crystalMesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+    crystalMesh.instanceColor?.setUsage(THREE.StaticDrawUsage);
+    crystalMesh.computeBoundingSphere();
+    this.group.add(rockMesh, crystalMesh);
 
     const cloudMaterial = createCloudMaterial(this.definition.atmosphere);
     for (let index = 0; index < 9; index += 1) {
