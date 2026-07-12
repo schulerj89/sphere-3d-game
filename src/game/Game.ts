@@ -188,6 +188,7 @@ export class Game {
     this.hud.classList.remove('is-hidden');
     this.audio.start();
     this.audio.play('confirm');
+    this.hero.triggerWeaponAnimation('equip', this.elapsed);
     this.input = new MobileInput({ mount: document.body, joystickRadius: 61 });
     this.setStatus('Find bright star tokens, then stand in the launch halo and press JUMP.');
     this.updateUi();
@@ -528,7 +529,9 @@ export class Game {
                 run: 'Running_A',
                 jumpStart: 'Jump_Start',
                 jumpAir: 'Jump_Full_Long',
-                pounce: 'Unarmed_Melee_Attack_Kick',
+                // Nova's retained crossbow + offhand knife now use the authored 1H
+                // slice instead of an unarmed kick, so the weapons read during impact.
+                pounce: '1H_Melee_Attack_Slice_Horizontal',
                 hurt: 'Hit_A',
                 celebrate: 'Cheer',
               };
@@ -570,6 +573,7 @@ export class Game {
 
   private triggerAnimation(name: string, duration: number): void {
     this.animationLockedUntil = this.elapsed + duration;
+    if (name === 'pounce') this.hero.triggerWeaponAnimation('attack', this.elapsed);
     this.setCharacterAnimation(name);
   }
 
