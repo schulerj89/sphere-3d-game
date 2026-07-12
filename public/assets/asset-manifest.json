@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "generatedOn": "2026-07-12",
-  "licensePolicy": "CC0-1.0-only",
-  "totalIncludedBytes": 7092091,
+  "licensePolicy": "CC0-1.0 bundled third-party media; Eleven Music output is governed by the generating account's ElevenLabs Music Terms and is embedded only as game soundtrack.",
+  "totalIncludedBytes": 7813533,
   "loadPolicy": {
     "model": "Load after the procedural player and playable scene exist; retain the procedural fallback if this request fails.",
     "audio": "Begin playback only after a user gesture. Decode short SFX once and reuse them."
@@ -11,7 +11,7 @@
     {
       "id": "kaykit-rogue",
       "kind": "model/gltf-binary",
-      "url": "/assets/characters/kaykit-rogue.glb",
+      "url": "assets/characters/kaykit-rogue.glb",
       "bytes": 3616284,
       "sha256": "e825437cd4d2ee9c1960b517a74a69101e33eb409ae7fa8cedc7134a998fbb7d",
       "license": "CC0-1.0",
@@ -43,7 +43,7 @@
     {
       "id": "space-flight",
       "kind": "audio/mpeg",
-      "url": "/assets/audio/music/space-flight.mp3",
+      "url": "assets/audio/music/space-flight.mp3",
       "bytes": 897484,
       "sha256": "c1e28034a8bbf8abebf18bb30cfd1b8723ef79ada4759ef96ec80d4bd7a1dd64",
       "license": "CC0-1.0",
@@ -56,7 +56,7 @@
     {
       "id": "orbital-action",
       "kind": "audio/mpeg",
-      "url": "/assets/audio/music/orbital-action.mp3",
+      "url": "assets/audio/music/orbital-action.mp3",
       "bytes": 1976181,
       "sha256": "f8a232f6fc5a52d1ea85705447617a1d6132e63d993d63ad542c253f1b614b93",
       "license": "CC0-1.0",
@@ -67,9 +67,26 @@
       "loop": true
     },
     {
+      "id": "elevenlabs-starbound-sprint",
+      "kind": "audio/mpeg",
+      "url": "assets/audio/music/elevenlabs-starbound-sprint.mp3",
+      "bytes": 721442,
+      "sha256": "90c2e97208c353ec53f1b5d57dff5f379b7dbbd1ba15f0e25c1b36788a11acc3",
+      "license": "ElevenLabs Music Terms; not CC0 and not a standalone redistributable asset",
+      "provider": "Eleven Music v2",
+      "apiReference": "https://elevenlabs.io/docs/api-reference/music/compose",
+      "termsUrl": "https://elevenlabs.io/music-terms",
+      "songId": "VXHiYl0ZiBBSOi4FL9Ew",
+      "generatedOn": "2026-07-12",
+      "prompt": "Original instrumental cosmic 3D platformer exploration theme; synth arpeggios, heroic brass-like synth stabs, marimba, light percussion, warm bass, star chimes, 138 BPM, no vocals or references to existing works.",
+      "intendedUse": "Primary in-game exploration loop; load after a user gesture. Keep the CC0 orbital-action track as runtime fallback.",
+      "durationSeconds": 45.087,
+      "loop": true
+    },
+    {
       "id": "ui-confirm",
       "kind": "audio/wav",
-      "url": "/assets/audio/sfx/ui-confirm.wav",
+      "url": "assets/audio/sfx/ui-confirm.wav",
       "bytes": 25530,
       "sha256": "be0fca32cb4d39cb84a54951897d6ae070e8d5d9749132b72d7fd07aec18c824",
       "license": "CC0-1.0",
@@ -80,7 +97,7 @@
     {
       "id": "jump",
       "kind": "audio/wav",
-      "url": "/assets/audio/sfx/jump.wav",
+      "url": "assets/audio/sfx/jump.wav",
       "bytes": 25372,
       "sha256": "5370db118da8710b95d91a1f7a98b0f86e815cd668b45d2bc6c9cdbe2deb0db8",
       "license": "CC0-1.0",
@@ -91,7 +108,7 @@
     {
       "id": "dash",
       "kind": "audio/wav",
-      "url": "/assets/audio/sfx/dash.wav",
+      "url": "assets/audio/sfx/dash.wav",
       "bytes": 202904,
       "sha256": "6e699ad9333fd2cf8fd455ec3ff8f27bca406634c29e68c895d359bbbd9db211",
       "license": "CC0-1.0",
@@ -102,7 +119,7 @@
     {
       "id": "hurt",
       "kind": "audio/wav",
-      "url": "/assets/audio/sfx/hurt.wav",
+      "url": "assets/audio/sfx/hurt.wav",
       "bytes": 44190,
       "sha256": "a572bed733d262ee92bc55a5d0781e1a19d7458c39438e41e5357338a2aa93a8",
       "license": "CC0-1.0",
@@ -113,7 +130,7 @@
     {
       "id": "enemy-pounce",
       "kind": "audio/wav",
-      "url": "/assets/audio/sfx/enemy-pounce.wav",
+      "url": "assets/audio/sfx/enemy-pounce.wav",
       "bytes": 248768,
       "sha256": "dc4be9070c54fb72ff3e7c457b0748334b7b6dd35d5ad9f67203291472e100fb",
       "license": "CC0-1.0",
@@ -124,7 +141,7 @@
     {
       "id": "coin",
       "kind": "audio/mpeg",
-      "url": "/assets/audio/sfx/coin.mp3",
+      "url": "assets/audio/sfx/coin.mp3",
       "bytes": 55378,
       "sha256": "d8d56a4084a5c03e5b5c47502818bf365d7527f94062fdf188850c38269b683c",
       "license": "CC0-1.0",

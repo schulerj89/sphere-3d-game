@@ -45,10 +45,10 @@ declare global {
 }
 
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
+const assetPath = (path: string): string => `${import.meta.env.BASE_URL}${path}`;
 
 export class Game {
   private readonly audio = new AudioDirector();
-  private readonly clock = new THREE.Clock();
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.PerspectiveCamera(55, 1, 0.1, 430);
   private readonly hero: HeroVisual = createHeroVisual();
@@ -67,6 +67,7 @@ export class Game {
   private phase: GamePhase = 'title';
   private cinematic: LaunchCinematic | undefined;
   private elapsed = 0;
+  private lastFrameTimestamp = performance.now();
   private playerHeight = 0;
   private verticalVelocity = 0;
   private cameraYaw = 0.2;
@@ -79,6 +80,12 @@ export class Game {
   private trailCooldown = 0;
   private fps = 60;
   private muted = false;
+  private modelMixer: THREE.AnimationMixer | undefined;
+  private activeAnimation: THREE.AnimationAction | undefined;
+  private readonly modelActions = new Map<string, THREE.AnimationAction>();
+  private animationLockedUntil = 0;
+  private readonly loadedAssetIds = ['procedural-planets', 'procedural-hero'];
+  private readonly assetErrors: string[] = [];
 
   private titleScreen!: HTMLElement;
   private hud!: HTMLElement;
@@ -152,6 +159,7 @@ export class Game {
     this.camera.position.set(24, 19, 26);
     this.cameraPosition.copy(this.camera.position);
     this.camera.lookAt(this.activePlanet.definition.center);
+    this.loadCharacterModel();
   }
 
   private bindUi(): void {
@@ -170,17 +178,21 @@ export class Game {
     this.titleScreen.classList.add('is-hidden');
     this.hud.classList.remove('is-hidden');
     this.audio.start();
+    this.audio.play('confirm');
     this.input = new MobileInput({ mount: document.body, joystickRadius: 61 });
     this.setStatus('Find bright star tokens, then stand in the launch halo and press JUMP.');
     this.updateUi();
   };
 
   private readonly tick = (): void => {
-    const delta = Math.min(this.clock.getDelta(), 0.05);
+    const now = performance.now();
+    const delta = Math.min(Math.max((now - this.lastFrameTimestamp) / 1000, 0), 0.05);
+    this.lastFrameTimestamp = now;
     this.elapsed += delta;
     this.fps = THREE.MathUtils.lerp(this.fps, 1 / Math.max(delta, 0.001), 0.08);
     this.galaxy.update(delta);
     this.trail.update(delta);
+    this.modelMixer?.update(delta);
     for (const planet of this.planets) planet.update(delta);
 
     if (this.phase === 'playing') {
@@ -210,6 +222,7 @@ export class Game {
       if (grounded) {
         this.verticalVelocity = 10.8;
         this.audio.play('jump');
+        this.triggerAnimation('jumpStart', 0.24);
         this.setStatus('Arc high enough to pounce on a Voidling.');
       } else if (this.activePlanet.isNearLaunch(this.playerNormal) && !this.activePlanet.isLaunchReady) {
         this.setStatus(`Launch halo needs ${this.activePlanet.coinTarget - this.activePlanet.collectedCoins} more star tokens.`);
@@ -266,6 +279,9 @@ export class Game {
     this.hero.group.quaternion.copy(surfaceOrientation(this.playerNormal, this.playerHeading));
     this.hero.setRunCycle(speed, this.elapsed, airborne);
     this.hero.setHurt(this.invulnerability > 0 && Math.floor(this.elapsed * 18) % 2 === 0);
+    if (this.elapsed >= this.animationLockedUntil) {
+      this.setCharacterAnimation(airborne ? 'jumpAir' : speed > 0.15 ? 'run' : 'idle');
+    }
   }
 
   private collectAndResolveEncounters(): void {
@@ -284,6 +300,7 @@ export class Game {
       this.verticalVelocity = 9.2;
       this.defeatedEnemies += 1;
       this.audio.play('pounce');
+      this.triggerAnimation('pounce', 0.46);
       this.setStatus('Voidling bounced! Keep your momentum and hunt more tokens.');
       return;
     }
@@ -292,6 +309,7 @@ export class Game {
     this.invulnerability = 1.25;
     this.verticalVelocity = 6.8;
     this.audio.play('hit');
+    this.triggerAnimation('hurt', 0.4);
     if (this.health <= 0) {
       this.health = 3;
       this.placePlayerAt(this.activePlanet, this.activePlanet.definition.startNormal);
@@ -307,6 +325,7 @@ export class Game {
     if (!destination) {
       this.phase = 'complete';
       this.audio.play('complete');
+      this.triggerAnimation('celebrate', 1.1);
       this.hud.classList.add('is-hidden');
       this.completeScreen.classList.remove('is-hidden');
       return;
@@ -321,6 +340,7 @@ export class Game {
     };
     this.cinematicOverlay.classList.add('is-active');
     this.audio.play('launch');
+    this.audio.setCinematic(true);
     this.setStatus(`Slingshotting to ${destination.definition.name}…`);
   }
 
@@ -353,6 +373,7 @@ export class Game {
     this.cinematic = undefined;
     this.phase = 'playing';
     this.cinematicOverlay.classList.remove('is-active');
+    this.audio.setCinematic(false);
     this.setStatus(`${this.activePlanet.definition.name} reached. The next route is all yours.`);
   }
 
@@ -432,8 +453,8 @@ export class Game {
       health: this.health,
       coins: this.coins,
       planetsCompleted: this.planets.indexOf(this.activePlanet),
-      loadedAssetIds: ['procedural-hero', 'procedural-planets', 'synth-audio'],
-      assetErrors: [],
+      loadedAssetIds: this.loadedAssetIds,
+      assetErrors: this.assetErrors,
       renderer: {
         calls: info.render.calls,
         triangles: info.render.triangles,
@@ -450,6 +471,69 @@ export class Game {
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height, false);
   };
+
+  private loadCharacterModel(): void {
+    void import('three/addons/loaders/GLTFLoader.js').then(({ GLTFLoader }) => {
+      const loader = new GLTFLoader();
+      loader.load(
+        assetPath('assets/characters/kaykit-rogue.glb'),
+        (gltf) => {
+          try {
+            const model = gltf.scene;
+            model.traverse((node) => {
+              if (node instanceof THREE.Mesh) {
+                node.castShadow = false;
+                node.receiveShadow = false;
+              }
+            });
+            const sourceBounds = new THREE.Box3().setFromObject(model);
+            const sourceHeight = sourceBounds.getSize(new THREE.Vector3()).y;
+            model.scale.setScalar(2.52 / Math.max(0.001, sourceHeight));
+            const scaledBounds = new THREE.Box3().setFromObject(model);
+            model.position.y = -scaledBounds.min.y;
+            model.rotation.y = Math.PI;
+            this.hero.attachModel(model);
+            this.modelMixer = new THREE.AnimationMixer(model);
+            const aliases: Record<string, string> = {
+              idle: 'Idle',
+              run: 'Running_A',
+              jumpStart: 'Jump_Start',
+              jumpAir: 'Jump_Full_Long',
+              pounce: 'Unarmed_Melee_Attack_Kick',
+              hurt: 'Hit_A',
+              celebrate: 'Cheer',
+            };
+            for (const [name, clipName] of Object.entries(aliases)) {
+              const clip = THREE.AnimationClip.findByName(gltf.animations, clipName);
+              if (clip) this.modelActions.set(name, this.modelMixer.clipAction(clip));
+            }
+            this.loadedAssetIds.push('kaykit-rogue');
+            this.setCharacterAnimation('idle');
+          } catch (error) {
+            this.assetErrors.push(`kaykit-rogue: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        },
+        undefined,
+        () => this.assetErrors.push('kaykit-rogue: failed to load; using the procedural hero'),
+      );
+    }).catch(() => this.assetErrors.push('kaykit-rogue: loader failed to initialize; using the procedural hero'));
+  }
+
+  private triggerAnimation(name: string, duration: number): void {
+    this.animationLockedUntil = this.elapsed + duration;
+    this.setCharacterAnimation(name);
+  }
+
+  private setCharacterAnimation(name: string): void {
+    const action = this.modelActions.get(name);
+    if (!action || action === this.activeAnimation) return;
+    this.activeAnimation?.fadeOut(0.14);
+    action.reset();
+    action.setEffectiveTimeScale(1);
+    action.setEffectiveWeight(1);
+    action.fadeIn(0.14).play();
+    this.activeAnimation = action;
+  }
 
   private element<T extends Element = HTMLElement>(selector: string): T {
     const element = this.root.querySelector<T>(selector);

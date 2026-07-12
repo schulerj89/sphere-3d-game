@@ -438,6 +438,7 @@ export class Planet {
 
 export interface HeroVisual {
   readonly group: THREE.Group;
+  attachModel(model: THREE.Object3D): void;
   setRunCycle(speed: number, elapsed: number, airborne: boolean): void;
   setHurt(active: boolean): void;
 }
@@ -445,6 +446,9 @@ export interface HeroVisual {
 export function createHeroVisual(): HeroVisual {
   const group = new THREE.Group();
   group.name = 'Nova, the Star Runner';
+  const fallback = new THREE.Group();
+  fallback.name = 'procedural player fallback';
+  group.add(fallback);
   const suit = new THREE.MeshStandardMaterial({
     color: 0xeff8ff,
     roughness: 0.28,
@@ -496,12 +500,16 @@ export function createHeroVisual(): HeroVisual {
       limb.add(boot);
     }
     limb.position.set(x, y, z);
-    group.add(limb);
+    fallback.add(limb);
   }
-  group.add(body, helmet, visorMesh, pack, core);
+  fallback.add(body, helmet, visorMesh, pack, core);
 
   return {
     group,
+    attachModel(model: THREE.Object3D): void {
+      fallback.visible = false;
+      group.add(model);
+    },
     setRunCycle(speed: number, elapsed: number, airborne: boolean): void {
       const amount = Math.min(1, speed / 8);
       const swing = Math.sin(elapsed * (airborne ? 5 : 14)) * 0.75 * amount;

@@ -1,15 +1,21 @@
-type SoundName = 'jump' | 'coin' | 'pounce' | 'hit' | 'launch' | 'complete';
+type SoundName = 'confirm' | 'jump' | 'coin' | 'pounce' | 'hit' | 'launch' | 'complete';
+type MusicTrack = 'gameplay' | 'cinematic';
+
+const audioPath = (path: string): string => `${import.meta.env.BASE_URL}assets/audio/${path}`;
 
 /**
- * A tiny synthesized score and SFX bank keeps the prototype playable without
- * shipping an opaque audio asset. It can be replaced by licensed tracks later.
+ * Plays the bundled CC0 tracks/SFX after a gesture, with a lightweight
+ * synthesized score and effects as an offline/network-failure fallback.
  */
 export class AudioDirector {
   private context: AudioContext | undefined;
   private master: GainNode | undefined;
   private musicGain: GainNode | undefined;
   private loopTimer: number | undefined;
+  private music: HTMLAudioElement | undefined;
+  private musicSource: string | undefined;
   private muted = false;
+  private usingAssetMusic = false;
 
   start(): void {
     if (!this.context) {
@@ -21,21 +27,86 @@ export class AudioDirector {
       this.musicGain.gain.value = 0.19;
       this.musicGain.connect(this.master);
     }
-
     void this.context.resume();
-    if (this.loopTimer === undefined) this.scheduleMusic();
+    this.setMusicTrack('gameplay');
+  }
+
+  setCinematic(active: boolean): void {
+    if (!this.context) return;
+    this.setMusicTrack(active ? 'cinematic' : 'gameplay');
   }
 
   toggleMute(): boolean {
     this.muted = !this.muted;
     if (this.master) this.master.gain.value = this.muted ? 0 : 0.42;
+    if (this.music) this.music.muted = this.muted;
     return this.muted;
   }
 
   play(sound: SoundName): void {
+    if (this.muted) return;
+    const effectPaths: Record<SoundName, string> = {
+      confirm: 'sfx/ui-confirm.wav',
+      jump: 'sfx/jump.wav',
+      coin: 'sfx/coin.mp3',
+      pounce: 'sfx/enemy-pounce.wav',
+      hit: 'sfx/hurt.wav',
+      launch: 'sfx/dash.wav',
+      complete: 'sfx/ui-confirm.wav',
+    };
+    const effect = new Audio(audioPath(effectPaths[sound]));
+    effect.volume = sound === 'launch' ? 0.38 : 0.34;
+    effect.playbackRate = sound === 'coin' ? 0.94 + Math.random() * 0.16 : 1;
+    void effect.play().catch(() => this.playSynthEffect(sound));
+  }
+
+  dispose(): void {
+    if (this.loopTimer !== undefined) window.clearTimeout(this.loopTimer);
+    this.music?.pause();
+    this.music = undefined;
+    void this.context?.close();
+  }
+
+  private setMusicTrack(track: MusicTrack, useCc0Fallback = false): void {
+    const source = track === 'gameplay'
+      ? useCc0Fallback ? 'cc0-gameplay' : 'elevenlabs-gameplay'
+      : 'cc0-cinematic';
+    if (this.musicSource === source && this.music) return;
+    this.music?.pause();
+    const file = source === 'elevenlabs-gameplay'
+      ? 'music/elevenlabs-starbound-sprint.mp3'
+      : source === 'cc0-gameplay'
+        ? 'music/orbital-action.mp3'
+        : 'music/space-flight.mp3';
+    const next = new Audio(audioPath(file));
+    next.loop = true;
+    next.volume = track === 'gameplay' ? 0.36 : 0.3;
+    next.muted = this.muted;
+    this.music = next;
+    this.musicSource = source;
+    this.usingAssetMusic = false;
+    void next.play().then(() => {
+      if (this.music !== next) return;
+      this.usingAssetMusic = true;
+      if (this.loopTimer !== undefined) {
+        window.clearTimeout(this.loopTimer);
+        this.loopTimer = undefined;
+      }
+    }).catch(() => {
+      if (this.music !== next || this.usingAssetMusic) return;
+      if (track === 'gameplay' && !useCc0Fallback) {
+        this.setMusicTrack('gameplay', true);
+      } else if (this.loopTimer === undefined) {
+        this.scheduleMusic();
+      }
+    });
+  }
+
+  private playSynthEffect(sound: SoundName): void {
     if (!this.context || !this.master || this.muted) return;
     const now = this.context.currentTime;
     const profile: Record<SoundName, [number, number, number, OscillatorType]> = {
+      confirm: [420, 740, 0.13, 'triangle'],
       jump: [230, 520, 0.14, 'triangle'],
       coin: [740, 1320, 0.16, 'sine'],
       pounce: [180, 820, 0.22, 'square'],
@@ -50,13 +121,8 @@ export class AudioDirector {
     }
   }
 
-  dispose(): void {
-    if (this.loopTimer !== undefined) window.clearTimeout(this.loopTimer);
-    void this.context?.close();
-  }
-
   private scheduleMusic(): void {
-    if (!this.context || !this.musicGain) return;
+    if (!this.context || !this.musicGain || this.usingAssetMusic) return;
     const now = this.context.currentTime + 0.08;
     const phrase = [
       [220, 0], [277.18, 0.38], [329.63, 0.76], [440, 1.14],
