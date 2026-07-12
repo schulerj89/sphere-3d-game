@@ -43,6 +43,7 @@ export interface PlanetBoss {
 }
 
 export interface PlanetRelic {
+  readonly source: 'rings' | 'boss';
   readonly normal: THREE.Vector3;
   readonly mesh: THREE.Group;
   collected: boolean;
@@ -595,7 +596,7 @@ export class Planet {
   readonly coins: Coin[] = [];
   readonly enemies: Enemy[] = [];
   readonly boss?: PlanetBoss;
-  readonly relic?: PlanetRelic;
+  readonly relics: PlanetRelic[] = [];
   readonly launchPad: THREE.Group;
   readonly coinTarget: number;
   readonly relicRingTarget: number;
@@ -638,12 +639,23 @@ export class Planet {
       arena.name = 'boss arena';
       this.group.add(arena, bossMesh);
 
-      const relicMesh = createRelic();
-      relicMesh.visible = false;
-      relicMesh.position.copy(definition.bossNormal).multiplyScalar(definition.radius + 1.1);
-      relicMesh.quaternion.copy(surfaceOrientation(definition.bossNormal));
-      this.relic = { normal: definition.bossNormal.clone(), mesh: relicMesh, collected: false };
-      this.group.add(relicMesh);
+      const relicAxis = new THREE.Vector3().crossVectors(definition.bossNormal, UP).normalize();
+      if (relicAxis.lengthSq() < 0.001) relicAxis.set(1, 0, 0);
+      const ringRelicNormal = definition.bossNormal.clone().applyAxisAngle(relicAxis, 0.16).normalize();
+      const bossRelicNormal = definition.bossNormal.clone().applyAxisAngle(relicAxis, -0.16).normalize();
+      const relicDefinitions: Array<{ source: PlanetRelic['source']; normal: THREE.Vector3 }> = [
+        { source: 'rings', normal: ringRelicNormal },
+        { source: 'boss', normal: bossRelicNormal },
+      ];
+      for (const relicDefinition of relicDefinitions) {
+        const relicMesh = createRelic();
+        relicMesh.visible = false;
+        relicMesh.position.copy(relicDefinition.normal).multiplyScalar(definition.radius + 1.1);
+        relicMesh.quaternion.copy(surfaceOrientation(relicDefinition.normal));
+        relicMesh.name = `${relicDefinition.source} Aurora Crown relic`;
+        this.relics.push({ source: relicDefinition.source, normal: relicDefinition.normal, mesh: relicMesh, collected: false });
+        this.group.add(relicMesh);
+      }
     }
     this.launchPad = this.createLaunchPad();
     this.group.add(this.launchPad);
@@ -654,7 +666,7 @@ export class Planet {
   }
 
   get isLaunchReady(): boolean {
-    return this.isBossPlanet ? this.relicCollected : this.collectedCoins >= this.coinTarget;
+    return this.isBossPlanet ? this.allRelicsCollected : this.collectedCoins >= this.coinTarget;
   }
 
   get isBossPlanet(): boolean {
@@ -666,13 +678,23 @@ export class Planet {
   }
 
   get isRelicReady(): boolean {
-    return this.relic !== undefined
-      && !this.relic.collected
-      && (this.isBossDefeated || this.collectedCoins >= this.relicRingTarget);
+    return this.relics.some((relic) => !relic.collected && this.isRelicUnlocked(relic));
+  }
+
+  get relicsReady(): number {
+    return this.relics.filter((relic) => !relic.collected && this.isRelicUnlocked(relic)).length;
   }
 
   get relicCollected(): boolean {
-    return this.relic?.collected ?? false;
+    return this.relicsCollected > 0;
+  }
+
+  get relicsCollected(): number {
+    return this.relics.filter((relic) => relic.collected).length;
+  }
+
+  get allRelicsCollected(): boolean {
+    return this.relics.length > 0 && this.relics.every((relic) => relic.collected);
   }
 
   worldPosition(normal: THREE.Vector3, height = 0): THREE.Vector3 {
@@ -706,11 +728,15 @@ export class Planet {
   }
 
   collectRelicNear(normal: THREE.Vector3, threshold = 1.8): PlanetRelic | undefined {
-    if (!this.relic || !this.isRelicReady) return undefined;
-    if (arcDistance(this.relic.normal, normal, this.definition.radius) >= threshold) return undefined;
-    this.relic.collected = true;
-    this.relic.mesh.visible = false;
-    return this.relic;
+    const relic = this.relics.find((candidate) => (
+      !candidate.collected
+      && this.isRelicUnlocked(candidate)
+      && arcDistance(candidate.normal, normal, this.definition.radius) < threshold
+    ));
+    if (!relic) return undefined;
+    relic.collected = true;
+    relic.mesh.visible = false;
+    return relic;
   }
 
   isNearLaunch(normal: THREE.Vector3): boolean {
@@ -750,17 +776,23 @@ export class Planet {
         if (aura) aura.rotation.z += delta * 1.8;
       }
     }
-    if (this.relic) {
-      this.relic.mesh.visible = this.isRelicReady;
-      if (this.relic.mesh.visible) {
-        this.relic.mesh.rotation.y += delta * 1.8;
-        const pulse = 1 + Math.sin(this.elapsed * 5.5) * 0.1;
-        this.relic.mesh.scale.setScalar(pulse);
+    for (const [index, relic] of this.relics.entries()) {
+      relic.mesh.visible = !relic.collected && this.isRelicUnlocked(relic);
+      if (relic.mesh.visible) {
+        relic.mesh.rotation.y += delta * 1.8;
+        const pulse = 1 + Math.sin(this.elapsed * 5.5 + index * 1.4) * 0.1;
+        relic.mesh.scale.setScalar(pulse);
       }
     }
     const launchPulse = this.isLaunchReady ? 1.35 + Math.sin(this.elapsed * 5) * 0.45 : 0.38;
     this.launchMaterial.emissiveIntensity = launchPulse;
     this.launchPad.rotation.y += delta * (this.isLaunchReady ? 0.9 : 0.22);
+  }
+
+  private isRelicUnlocked(relic: PlanetRelic): boolean {
+    return relic.source === 'boss'
+      ? this.isBossDefeated
+      : this.collectedCoins >= this.relicRingTarget;
   }
 
   private createSurface(): void {

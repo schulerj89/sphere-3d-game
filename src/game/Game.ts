@@ -47,8 +47,9 @@ interface StarboundDebugSnapshot {
     readonly health: number;
     readonly maxHealth: number;
     readonly defeated: boolean;
-    readonly relicReady: boolean;
-    readonly relicCollected: boolean;
+    readonly relicsReady: number;
+    readonly relicsCollected: number;
+    readonly relicsTotal: number;
   };
   readonly renderer: {
     readonly calls: number;
@@ -293,8 +294,8 @@ export class Game {
         this.setStatus('Arc high enough to pounce on a Voidling.');
       } else if (this.activePlanet.isBossPlanet && this.activePlanet.isNearLaunch(this.playerNormal) && !this.activePlanet.isLaunchReady) {
         this.setStatus(this.activePlanet.isRelicReady
-          ? 'The Aurora Crown is still waiting at the Warden arena.'
-          : 'The final launch halo answers only to the Aurora Crown.');
+          ? `The Aurora Crown relics are still waiting at the Warden arena (${this.activePlanet.relicsCollected}/${this.activePlanet.relics.length}).`
+          : 'The final launch halo answers only to both Aurora Crown relics.');
       } else if (this.activePlanet.isNearLaunch(this.playerNormal) && !this.activePlanet.isLaunchReady) {
         this.setStatus(`Launch halo needs ${this.activePlanet.coinTarget - this.activePlanet.collectedCoins} more star tokens.`);
       }
@@ -378,7 +379,7 @@ export class Game {
       if (this.activePlanet.isBossPlanet) {
         const remaining = Math.max(0, this.activePlanet.relicRingTarget - this.activePlanet.collectedCoins);
         this.setStatus(remaining === 0
-          ? 'Aurora Crown awakened! Find the relic at the Warden arena.'
+          ? 'Ring relic awakened! Find it at the Warden arena, then defeat the boss for the second crown.'
           : `${remaining} more rings to awaken the Aurora Crown.`);
       } else {
         const remaining = Math.max(0, this.activePlanet.coinTarget - this.activePlanet.collectedCoins);
@@ -389,7 +390,14 @@ export class Game {
     const relic = this.activePlanet.collectRelicNear(this.playerNormal);
     if (relic) {
       this.audio.play('complete');
-      this.beginBossVictory();
+      const collectedRelics = this.activePlanet.relicsCollected;
+      const totalRelics = this.activePlanet.relics.length;
+      if (this.activePlanet.allRelicsCollected) {
+        this.beginBossVictory();
+      } else {
+        const sourceLabel = relic.source === 'boss' ? 'Warden' : 'ring';
+        this.setStatus(`${sourceLabel} Aurora Crown relic claimed (${collectedRelics}/${totalRelics}). Find the other relic.`);
+      }
       return;
     }
 
@@ -401,7 +409,7 @@ export class Game {
         this.audio.play('pounce');
         this.triggerAnimation('pounce', 0.52);
         this.setStatus(defeated
-          ? 'The Crown Warden falls! Collect the Aurora Crown.'
+          ? 'The Crown Warden falls! One Aurora Crown relic is ready; collect the ring relic too.'
           : `Crown Warden struck! ${boss.health}/${boss.maxHealth} armor remaining.`);
         return;
       }
@@ -719,11 +727,19 @@ export class Game {
     this.hero.group.quaternion.copy(surfaceOrientation(this.playerNormal, this.playerHeading));
     this.cameraDistance = 13;
     this.audio.setBossTheme(true);
-    this.setStatus(scenario === 'boss' ? 'QA boss arena: pounce the Crown Warden.' : 'QA victory cinematic: Crown relic claimed.');
+    this.setStatus(scenario === 'boss' ? 'QA boss arena: pounce the Crown Warden.' : 'QA victory cinematic: both Crown relics claimed.');
     if (scenario !== 'victory' || !finalPlanet.boss) return;
+    for (const coin of finalPlanet.coins.slice(0, finalPlanet.relicRingTarget)) {
+      if (coin.collected) continue;
+      coin.collected = true;
+      coin.mesh.visible = false;
+      this.coins += 1;
+    }
     finalPlanet.damageBoss(finalPlanet.boss.health);
-    finalPlanet.collectRelicNear(arenaNormal, 4);
-    this.beginBossVictory();
+    while (!finalPlanet.allRelicsCollected && finalPlanet.collectRelicNear(arenaNormal, 4)) {
+      // Collect both QA relics at the shared arena so the full payoff can be inspected.
+    }
+    if (finalPlanet.allRelicsCollected) this.beginBossVictory();
   }
 
   private updateTitleCamera(delta: number): void {
@@ -788,19 +804,21 @@ export class Game {
       : `Charge the launch halo: ${remaining} star token${remaining === 1 ? '' : 's'} remaining.`;
     if (planet.isBossPlanet) {
       const remaining = Math.max(0, planet.relicRingTarget - planet.collectedCoins);
-      this.missionText.textContent = planet.relicCollected
-        ? 'Aurora Crown claimed - Nova is the Starbound Champion.'
+      const collectedRelics = planet.relicsCollected;
+      const totalRelics = planet.relics.length;
+      this.missionText.textContent = planet.allRelicsCollected
+        ? 'Both Aurora Crown relics claimed - Nova is the Starbound Champion.'
         : planet.isRelicReady
-          ? 'Aurora Crown awakened - collect the relic at the Warden arena.'
-          : `Defeat the Crown Warden or collect ${remaining} more ring${remaining === 1 ? '' : 's'}.`;
+          ? `Aurora Crown relics ${collectedRelics}/${totalRelics} - collect the glowing relics at the Warden arena.`
+          : `Defeat the Crown Warden or collect ${remaining} more ring${remaining === 1 ? '' : 's'} to awaken a relic.`;
     }
     if (planet.isBossPlanet && planet.boss) {
       this.bossCard.classList.remove('is-hidden');
       const healthRatio = planet.boss.health / planet.boss.maxHealth;
       this.bossMeterFill.style.width = `${Math.round(healthRatio * 100)}%`;
       this.bossMeterText.textContent = planet.boss.defeated
-        ? 'WARDEN DEFEATED'
-        : `${planet.boss.health}/${planet.boss.maxHealth} ARMOR`;
+        ? `WARDEN DEFEATED | ${planet.relicsCollected}/${planet.relics.length} RELICS`
+        : `${planet.boss.health}/${planet.boss.maxHealth} ARMOR | ${planet.relicsCollected}/${planet.relics.length} RELICS`;
     } else {
       this.bossCard.classList.add('is-hidden');
     }
@@ -831,8 +849,9 @@ export class Game {
           health: this.activePlanet.boss.health,
           maxHealth: this.activePlanet.boss.maxHealth,
           defeated: this.activePlanet.boss.defeated,
-          relicReady: this.activePlanet.isRelicReady,
-          relicCollected: this.activePlanet.relicCollected,
+          relicsReady: this.activePlanet.relicsReady,
+          relicsCollected: this.activePlanet.relicsCollected,
+          relicsTotal: this.activePlanet.relics.length,
         }
         : undefined,
       renderer: {
@@ -982,7 +1001,7 @@ export class Game {
         <section class="complete-screen is-hidden">
           <p class="eyebrow">FINAL ORBIT COMPLETE</p>
           <h2>THE <span>AURORA CROWN</span> IS YOURS.</h2>
-          <p>Three worlds charted, ${this.coins} rings gathered, and the Crown Warden's light now follows Nova.</p>
+          <p>Both Aurora Crown relics secured, ${this.coins} rings gathered, and the Crown Warden's light now follows Nova.</p>
           <button class="restart-button" type="button">RUN IT AGAIN</button>
         </section>
       </section>`;
