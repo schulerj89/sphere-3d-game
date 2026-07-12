@@ -1,0 +1,136 @@
+{
+  "schemaVersion": 1,
+  "generatedOn": "2026-07-12",
+  "licensePolicy": "CC0-1.0-only",
+  "totalIncludedBytes": 7092091,
+  "loadPolicy": {
+    "model": "Load after the procedural player and playable scene exist; retain the procedural fallback if this request fails.",
+    "audio": "Begin playback only after a user gesture. Decode short SFX once and reuse them."
+  },
+  "assets": [
+    {
+      "id": "kaykit-rogue",
+      "kind": "model/gltf-binary",
+      "url": "/assets/characters/kaykit-rogue.glb",
+      "bytes": 3616284,
+      "sha256": "e825437cd4d2ee9c1960b517a74a69101e33eb409ae7fa8cedc7134a998fbb7d",
+      "license": "CC0-1.0",
+      "sourceUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0/main/addons/kaykit_character_pack_adventures/Characters/gltf/Rogue.glb",
+      "sourcePage": "https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0",
+      "animationAliases": {
+        "idle": "Idle",
+        "run": "Running_A",
+        "jumpStart": "Jump_Start",
+        "jumpAir": "Jump_Full_Long",
+        "jumpLand": "Jump_Land",
+        "pounce": "Unarmed_Melee_Attack_Kick",
+        "hurt": "Hit_A",
+        "celebrate": "Cheer"
+      },
+      "validated": {
+        "glbVersion": 2,
+        "skins": 1,
+        "embeddedImages": 1,
+        "animationClips": 76,
+        "meshes": 12,
+        "meshPrimitives": 12,
+        "triangles": 6377,
+        "materials": 1,
+        "textures": 1,
+        "nodes": 54
+      }
+    },
+    {
+      "id": "space-flight",
+      "kind": "audio/mpeg",
+      "url": "/assets/audio/music/space-flight.mp3",
+      "bytes": 897484,
+      "sha256": "c1e28034a8bbf8abebf18bb30cfd1b8723ef79ada4759ef96ec80d4bd7a1dd64",
+      "license": "CC0-1.0",
+      "sourceUrl": "https://opengameart.org/sites/default/files/space_flight_0.mp3",
+      "sourcePage": "https://opengameart.org/content/space-flight",
+      "intendedUse": "title-and-transfer-loop",
+      "durationSeconds": 37.224,
+      "loop": true
+    },
+    {
+      "id": "orbital-action",
+      "kind": "audio/mpeg",
+      "url": "/assets/audio/music/orbital-action.mp3",
+      "bytes": 1976181,
+      "sha256": "f8a232f6fc5a52d1ea85705447617a1d6132e63d993d63ad542c253f1b614b93",
+      "license": "CC0-1.0",
+      "sourceUrl": "https://opengameart.org/sites/default/files/8bit-spaceshooter.mp3",
+      "sourcePage": "https://opengameart.org/content/8-bit-epic-space-shooter-music",
+      "intendedUse": "gameplay-loop",
+      "durationSeconds": 82.338,
+      "loop": true
+    },
+    {
+      "id": "ui-confirm",
+      "kind": "audio/wav",
+      "url": "/assets/audio/sfx/ui-confirm.wav",
+      "bytes": 25530,
+      "sha256": "be0fca32cb4d39cb84a54951897d6ae070e8d5d9749132b72d7fd07aec18c824",
+      "license": "CC0-1.0",
+      "sourceUrl": "https://opengameart.org/sites/default/files/button.wav",
+      "sourcePage": "https://opengameart.org/content/8-bit-platformer-sfx-0",
+      "durationSeconds": 0.289
+    },
+    {
+      "id": "jump",
+      "kind": "audio/wav",
+      "url": "/assets/audio/sfx/jump.wav",
+      "bytes": 25372,
+      "sha256": "5370db118da8710b95d91a1f7a98b0f86e815cd668b45d2bc6c9cdbe2deb0db8",
+      "license": "CC0-1.0",
+      "sourceUrl": "https://opengameart.org/sites/default/files/jump_1.wav",
+      "sourcePage": "https://opengameart.org/content/8-bit-platformer-sfx-0",
+      "durationSeconds": 0.287
+    },
+    {
+      "id": "dash",
+      "kind": "audio/wav",
+      "url": "/assets/audio/sfx/dash.wav",
+      "bytes": 202904,
+      "sha256": "6e699ad9333fd2cf8fd455ec3ff8f27bca406634c29e68c895d359bbbd9db211",
+      "license": "CC0-1.0",
+      "sourceUrl": "https://opengameart.org/sites/default/files/dashwoosh.wav",
+      "sourcePage": "https://opengameart.org/content/8-bit-platformer-sfx-0",
+      "durationSeconds": 2.3
+    },
+    {
+      "id": "hurt",
+      "kind": "audio/wav",
+      "url": "/assets/audio/sfx/hurt.wav",
+      "bytes": 44190,
+      "sha256": "a572bed733d262ee92bc55a5d0781e1a19d7458c39438e41e5357338a2aa93a8",
+      "license": "CC0-1.0",
+      "sourceUrl": "https://opengameart.org/sites/default/files/playerhurt.wav",
+      "sourcePage": "https://opengameart.org/content/8-bit-platformer-sfx-0",
+      "durationSeconds": 0.501
+    },
+    {
+      "id": "enemy-pounce",
+      "kind": "audio/wav",
+      "url": "/assets/audio/sfx/enemy-pounce.wav",
+      "bytes": 248768,
+      "sha256": "dc4be9070c54fb72ff3e7c457b0748334b7b6dd35d5ad9f67203291472e100fb",
+      "license": "CC0-1.0",
+      "sourceUrl": "https://opengameart.org/sites/default/files/warlockhurt.wav",
+      "sourcePage": "https://opengameart.org/content/8-bit-platformer-sfx-0",
+      "durationSeconds": 2.82
+    },
+    {
+      "id": "coin",
+      "kind": "audio/mpeg",
+      "url": "/assets/audio/sfx/coin.mp3",
+      "bytes": 55378,
+      "sha256": "d8d56a4084a5c03e5b5c47502818bf365d7527f94062fdf188850c38269b683c",
+      "license": "CC0-1.0",
+      "sourceUrl": "https://opengameart.org/sites/default/files/harmonicaCoin.mp3",
+      "sourcePage": "https://opengameart.org/content/coin-sound-effect-harmonica",
+      "durationSeconds": 1.312
+    }
+  ]
+}
