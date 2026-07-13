@@ -807,7 +807,7 @@ export class Game {
       this.input?.setVisible(true);
       this.cameraDistance = DEFAULT_CAMERA_DISTANCE;
       this.audio.setCinematic(false);
-      this.audio.setBossTheme(this.activePlanet.isBossPlanet);
+      this.audio.setBossTheme(this.activePlanet.isBossPlanet && !this.activePlanet.isBossDefeated);
       this.setCharacterAnimation('idle');
       this.setStatus(`Aurora Crown relic claimed (${this.activePlanet.relicsCollected}/${this.activePlanet.relics.length}). Find the other crown.`);
       this.updateUi();
