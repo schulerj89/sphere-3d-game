@@ -73,6 +73,7 @@ export class MobileInput {
   private pinchDistance: number | null = null;
   private jumpPressed = false;
   private attackPressed = false;
+  private lastTouchEndAt = Number.NEGATIVE_INFINITY;
 
   constructor(options: MobileInputOptions = {}) {
     if (typeof document === 'undefined') {
@@ -284,6 +285,25 @@ export class MobileInput {
 
     window.addEventListener('pointerup', this.handleWindowPointerEnd, { signal });
     window.addEventListener('pointercancel', this.handleWindowPointerEnd, { signal });
+    // `touch-action: none` covers modern browsers, but iOS Safari can still
+    // promote two quick taps into a viewport zoom when the tap lands between
+    // controls. Cancel only that second tap (our pointer handlers continue to
+    // receive the input), while leaving two-finger pinch available for the
+    // in-game camera distance control.
+    window.addEventListener('touchstart', this.handleTouchStart, {
+      ...INPUT_LISTENER_OPTIONS,
+      signal,
+    });
+    window.addEventListener('touchend', this.handleTouchEnd, {
+      ...INPUT_LISTENER_OPTIONS,
+      signal,
+    });
+    for (const eventName of ['gesturestart', 'gesturechange', 'gestureend']) {
+      document.addEventListener(eventName, this.preventDefault, {
+        ...INPUT_LISTENER_OPTIONS,
+        signal,
+      });
+    }
     window.addEventListener('keydown', this.handleKeyDown, {
       ...INPUT_LISTENER_OPTIONS,
       signal,
@@ -461,6 +481,21 @@ export class MobileInput {
       this.resetAttack();
     }
     this.removeLookPointer(event.pointerId);
+  };
+
+  private readonly handleTouchStart = (event: TouchEvent): void => {
+    const now = performance.now();
+    if (event.touches.length === 1 && now - this.lastTouchEndAt < 320) {
+      this.preventEventDefault(event);
+    }
+  };
+
+  private readonly handleTouchEnd = (event: TouchEvent): void => {
+    const now = performance.now();
+    if (now - this.lastTouchEndAt < 320) {
+      this.preventEventDefault(event);
+    }
+    this.lastTouchEndAt = now;
   };
 
   private readonly handleKeyDown = (event: KeyboardEvent): void => {

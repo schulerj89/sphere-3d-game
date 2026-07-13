@@ -1050,9 +1050,11 @@ export class Game {
                 run: 'Running_A',
                 jumpStart: 'Jump_Start',
                 jumpAir: 'Jump_Full_Long',
-                // Nova's retained crossbow + offhand knife now use the authored 1H
-                // slice instead of an unarmed kick, so the weapons read during impact.
-                pounce: '1H_Melee_Attack_Slice_Horizontal',
+                // Nova carries a crossbow in the right hand and a knife in the
+                // left. The 1H slice only drives the active right-hand weapon,
+                // which made the knife look frozen. Use the authored dual-wield
+                // slice so both hand slots move during every attack.
+                pounce: 'Dualwield_Melee_Attack_Slice',
                 hurt: 'Hit_A',
                 celebrate: 'Cheer',
               };
