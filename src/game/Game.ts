@@ -42,6 +42,7 @@ interface BossVictoryCinematic {
   readonly focusDuration: number;
   readonly animationDuration: number;
   animationStarted: boolean;
+  readonly restoreBossAfterReward: boolean;
   elapsed: number;
 }
 
@@ -1025,15 +1026,22 @@ export class Game {
     const heading = this.playerHeading.clone().projectOnPlane(normal);
     if (heading.lengthSq() < 0.001) heading.copy(WORLD_UP).projectOnPlane(normal);
     heading.normalize();
-    // The Warden has already been defeated before either crown can be
-    // claimed. Keep its collapse out of the reward composition so it cannot
-    // sit between the camera and Nova while the celebration starts.
+    // Keep the Warden out of the reward composition so it cannot sit between
+    // the crown and the close-up lens. The ring relic can be collected before
+    // the Warden is defeated, so remember to restore that live arena after the
+    // non-finale reward shot instead of hiding it permanently.
+    let restoreBossAfterReward = false;
     if (this.activePlanet.boss?.defeated) {
       this.activePlanet.boss.mesh.visible = false;
       // The arena ring is a separate group, so hide it with the Warden to
       // keep its purple circle from becoming a foreground occluder.
       const bossArena = this.activePlanet.group.getObjectByName('boss arena');
       if (bossArena) bossArena.visible = false;
+    } else if (relic && this.activePlanet.boss) {
+      this.activePlanet.boss.mesh.visible = false;
+      const bossArena = this.activePlanet.group.getObjectByName('boss arena');
+      if (bossArena) bossArena.visible = false;
+      restoreBossAfterReward = true;
     }
     this.phase = 'bossVictory';
     const focusDuration = relic ? 2.05 : 0;
@@ -1052,6 +1060,7 @@ export class Game {
       focusDuration,
       animationDuration,
       animationStarted: !relic,
+      restoreBossAfterReward,
       elapsed: 0,
     };
     if (relic) {
@@ -1173,6 +1182,11 @@ export class Game {
       this.phase = 'playing';
       this.hud.classList.remove('is-hidden');
       this.input?.setVisible(true);
+      if (cinematic.restoreBossAfterReward && this.activePlanet.boss) {
+        this.activePlanet.boss.mesh.visible = true;
+        const bossArena = this.activePlanet.group.getObjectByName('boss arena');
+        if (bossArena) bossArena.visible = true;
+      }
       this.cameraDistance = DEFAULT_CAMERA_DISTANCE;
       this.audio.setCinematic(false);
       this.audio.setBossTheme(this.activePlanet.isBossPlanet && !this.activePlanet.isBossDefeated);
