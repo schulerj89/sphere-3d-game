@@ -376,6 +376,7 @@ function createRelic(): THREE.Group {
     blending: THREE.AdditiveBlending,
   });
   const crown = new THREE.Mesh(new THREE.TorusGeometry(0.72, 0.13, 8, 28), crownMaterial);
+  crown.name = 'procedural-relic-crown';
   crown.rotation.x = Math.PI / 2;
   const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.38, 1), coreMaterial);
   core.position.y = 0.18;
@@ -803,6 +804,37 @@ export class Planet {
     this.launchPad.add(model);
   }
 
+  /**
+   * Replaces the simple torus crown silhouette with a shared imported relic
+   * while retaining the cyan core/beam as the cheap readability fallback.
+   */
+  attachRelicModel(source: THREE.Object3D): void {
+    for (const relic of this.relics) {
+      const model = source.clone(true);
+      model.name = 'quaternius aurora crown';
+      model.traverse((node) => {
+        if (node instanceof THREE.Mesh) {
+          node.castShadow = false;
+          node.receiveShadow = false;
+        }
+      });
+      const bounds = new THREE.Box3().setFromObject(model);
+      const sourceSize = bounds.getSize(new THREE.Vector3());
+      const targetSize = 1.55;
+      const scale = targetSize / Math.max(0.001, Math.max(sourceSize.x, sourceSize.y, sourceSize.z));
+      model.scale.setScalar(scale);
+      const scaledBounds = new THREE.Box3().setFromObject(model);
+      const center = scaledBounds.getCenter(new THREE.Vector3());
+      model.position.set(-center.x, -scaledBounds.min.y + 0.24, -center.z);
+      model.rotation.y = Math.PI;
+      const fallback = relic.mesh.getObjectByName('procedural-relic-crown');
+      if (fallback) fallback.visible = false;
+      const previous = relic.mesh.getObjectByName('quaternius aurora crown');
+      if (previous) relic.mesh.remove(previous);
+      relic.mesh.add(model);
+    }
+  }
+
   collectNear(normal: THREE.Vector3, threshold = 1.15): Coin | undefined {
     const coin = this.coins.find((candidate) => !candidate.collected && arcDistance(candidate.normal, normal, this.definition.radius) < threshold);
     if (!coin) return undefined;
@@ -1178,7 +1210,7 @@ interface WeaponPose {
   readonly equipScale: THREE.Vector3;
 }
 
-const HERO_WEAPON_LOADOUT = new Set(['1H_Crossbow', 'Knife_Offhand']);
+const HERO_WEAPON_LOADOUT = new Set(['1H_Crossbow', 'Knife_Offhand', 'Pistol', 'Knife_1']);
 const HERO_HIDDEN_WEAPONS = new Set(['2H_Crossbow', 'Knife', 'Throwable']);
 
 export interface HeroVisual {
@@ -1254,10 +1286,10 @@ export function createHeroVisual(): HeroVisual {
   }
   fallback.add(body, helmet, visorMesh, pack, core);
 
-  // The source rogue ships every hand-slot prop in the same scene. Keep a
-  // readable two-piece loadout (crossbow + offhand knife), and animate those
-  // props independently so equip/attack beats remain visible even when the
-  // authored arm clips are cross-faded. The knife is a vertical cylinder, so
+  // Character sources can ship every hand-slot prop in one scene. Keep a
+  // readable two-piece loadout (blaster/crossbow + offhand knife), and animate
+  // those props independently so equip/attack beats remain visible even when
+  // the authored arm clips are cross-faded. The knife is a vertical cylinder, so
   // it needs a roll around its local Z axis to read as a slash (a small Y
   // recoil, which works for the crossbow, is almost invisible on the blade).
   let weaponPoses: WeaponPose[] = [];
@@ -1283,7 +1315,7 @@ export function createHeroVisual(): HeroVisual {
       // the source GLB or introducing another weapon mesh.
       const pulse = Math.sin(progress * Math.PI);
       for (const pose of weaponPoses) {
-        const isKnife = pose.object.name === 'Knife_Offhand';
+        const isKnife = /knife/i.test(pose.object.name);
         pose.object.position.copy(pose.position);
         pose.object.position.z -= pulse * (isKnife ? 0.13 : 0.075);
         pose.object.position.x += (isKnife ? -1 : 1) * pulse * (isKnife ? 0.07 : 0.035);

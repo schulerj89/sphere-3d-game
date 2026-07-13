@@ -273,6 +273,8 @@ button {
 }
 
 .health-count { color: #ff8ea5; letter-spacing: 0.12em; }
+.relic-count { color: #d7b9ff; font-size: 0.7rem; letter-spacing: 0.1em; }
+.relic-count.is-hidden { opacity: 0; visibility: hidden; }
 
 .mute-button {
   position: absolute;

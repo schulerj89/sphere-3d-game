@@ -165,6 +165,7 @@ export class Game {
   private bossMeterText!: HTMLElement;
   private coinText!: HTMLElement;
   private healthText!: HTMLElement;
+  private relicText!: HTMLElement;
   private statusText!: HTMLElement;
   private debugText!: HTMLElement;
   private muteButton!: HTMLButtonElement;
@@ -197,6 +198,7 @@ export class Game {
     this.bossMeterText = this.element('.boss-meter-text');
     this.coinText = this.element('.coin-count');
     this.healthText = this.element('.health-count');
+    this.relicText = this.element('.relic-count');
     this.statusText = this.element('.status-copy');
     this.debugText = this.element('.debug-panel');
     this.muteButton = this.element<HTMLButtonElement>('.mute-button');
@@ -205,7 +207,11 @@ export class Game {
     this.bindUi();
     this.resize();
     this.updateUi();
-    void Promise.all([this.loadCharacterModel(), this.loadLaunchPortalModel()]).then(this.finishLoading);
+    void Promise.all([
+      this.loadCharacterModel(),
+      this.loadLaunchPortalModel(),
+      this.loadRelicModel(),
+    ]).then(this.finishLoading);
     window.addEventListener('resize', this.resize);
     window.__starboundDebug = () => this.debugSnapshot();
   }
@@ -829,6 +835,16 @@ export class Game {
     const heading = this.playerHeading.clone().projectOnPlane(normal);
     if (heading.lengthSq() < 0.001) heading.copy(WORLD_UP).projectOnPlane(normal);
     heading.normalize();
+    // The Warden has already been defeated before either crown can be
+    // claimed. Keep its collapse out of the reward composition so it cannot
+    // sit between the camera and Nova while the celebration starts.
+    if (this.activePlanet.boss?.defeated) {
+      this.activePlanet.boss.mesh.visible = false;
+      // The arena ring is a separate group, so hide it with the Warden to
+      // keep its purple circle from becoming a foreground occluder.
+      const bossArena = this.activePlanet.group.getObjectByName('boss arena');
+      if (bossArena) bossArena.visible = false;
+    }
     this.phase = 'bossVictory';
     this.bossVictoryCinematic = {
       // Snap the reward beat to the planet surface even when the relic was
@@ -878,11 +894,18 @@ export class Game {
     const cameraSide = new THREE.Vector3().crossVectors(normal, cinematicForward).normalize();
     if (cameraSide.lengthSq() < 0.001) cameraSide.set(1, 0, 0);
     const cameraPosition = position.clone()
-      .addScaledVector(normal, THREE.MathUtils.lerp(7.8, 9.6, beat))
-      .addScaledVector(cameraSide, Math.sin(orbit) * THREE.MathUtils.lerp(2.8, 4.8, beat))
-      .addScaledVector(cinematicForward, 7.8 + Math.cos(orbit) * 2.2);
-    const cameraTarget = position.clone().addScaledVector(normal, 1.1);
-    this.camera.position.lerp(cameraPosition, 1 - Math.exp(-4.6 * delta));
+      // Keep the camera on an outward-normal line so the Warden cannot sit
+      // between Nova and the lens during the crown beat. A small tangent
+      // offset adds motion without turning the reward into an occlusion shot.
+      .addScaledVector(normal, THREE.MathUtils.lerp(13.5, 16.5, beat))
+      .addScaledVector(cameraSide, Math.sin(orbit) * THREE.MathUtils.lerp(4.2, 6.4, beat))
+      .addScaledVector(cinematicForward, 2.4 + Math.cos(orbit) * 1.1);
+    // Aim slightly above Nova's helmet so the model settles low in frame,
+    // beneath the title card, while the sphere-normal still controls screen
+    // up. A faster ease keeps the first reward beat from starting in the
+    // previous follow-camera pose.
+    const cameraTarget = position.clone().addScaledVector(normal, 1.45);
+    this.camera.position.lerp(cameraPosition, 1 - Math.exp(-9 * delta));
     this.camera.up.copy(normal);
     this.camera.lookAt(cameraTarget);
 
@@ -980,6 +1003,11 @@ export class Game {
         coin.mesh.visible = false;
         this.coins += 1;
       }
+      // Keep the deterministic crown capture representative of the actual
+      // reward beat: the Warden has fallen, then the ring relic is claimed.
+      if (finalPlanet.boss && !finalPlanet.boss.defeated) {
+        finalPlanet.damageBoss(finalPlanet.boss.health);
+      }
       const ringRelic = finalPlanet.relics.find((relic) => relic.source === 'rings');
       if (ringRelic) {
         this.placePlayerAt(finalPlanet, ringRelic.normal);
@@ -1066,6 +1094,8 @@ export class Game {
       ? 'Launch halo charged — stand inside it and press JUMP.'
       : `Charge the launch halo: ${remaining} star token${remaining === 1 ? '' : 's'} remaining.`;
     if (planet.isBossPlanet) {
+      this.relicText.classList.remove('is-hidden');
+      this.relicText.textContent = `CROWNS ${planet.relicsCollected}/${planet.relics.length}`;
       const remaining = Math.max(0, planet.relicRingTarget - planet.collectedCoins);
       const collectedRelics = planet.relicsCollected;
       const totalRelics = planet.relics.length;
@@ -1076,6 +1106,9 @@ export class Game {
           : collectedRelics > 0
             ? 'Defeat the Crown Warden to claim the second Aurora Crown relic.'
           : `Defeat the Crown Warden or collect ${remaining} more ring${remaining === 1 ? '' : 's'} to awaken a relic.`;
+    } else {
+      this.relicText.classList.add('is-hidden');
+      this.relicText.textContent = '';
     }
     if (planet.isBossPlanet && planet.boss) {
       this.bossCard.classList.remove('is-hidden');
@@ -1173,9 +1206,11 @@ export class Game {
           node.receiveShadow = false;
         }
         // The toon-shooter GLB contains every gun/knife variant in one file.
-        // Hide those props; the game's dedicated two-slot weapon presentation
-        // owns the visible loadout and avoids the previous weapon pile-up.
-        if (/^(Revolver|Sniper|Pistol|SMG|GrenadeLauncher|ShortCannon|Shotgun|RocketLauncher|AK|Shovel|Knife)/.test(node.name)) {
+        // Keep one compact blaster and one knife for the game's two-slot
+        // attack presentation, and hide every other authored weapon branch.
+        const isWeaponRoot = /^(Revolver|Sniper|Pistol|SMG|GrenadeLauncher|ShortCannon|Shotgun|RocketLauncher|AK|Shovel|Knife)/.test(node.name)
+          && Boolean(node.parent && /Index1R|Index2R|Index3R/.test(node.parent.name));
+        if (isWeaponRoot && !/^(Pistol|Knife_1)$/.test(node.name)) {
           node.visible = false;
         }
       });
@@ -1244,6 +1279,30 @@ export class Game {
     }
   }
 
+  private async loadRelicModel(): Promise<void> {
+    try {
+      const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
+      const loader = new GLTFLoader();
+      await new Promise<void>((resolve) => {
+        loader.load(
+          assetPath('assets/relics/quaternius-aurora-crown.glb'),
+          (gltf) => {
+            for (const planet of this.planets) planet.attachRelicModel(gltf.scene);
+            this.loadedAssetIds.push('quaternius-aurora-crown');
+            resolve();
+          },
+          undefined,
+          () => {
+            this.assetErrors.push('quaternius-aurora-crown: failed to load; using procedural crown aura');
+            resolve();
+          },
+        );
+      });
+    } catch {
+      this.assetErrors.push('quaternius-aurora-crown: loader failed to initialize; using procedural crown aura');
+    }
+  }
+
   private readonly finishLoading = async (): Promise<void> => {
     const remaining = MINIMUM_LOADING_SCREEN_DURATION - (performance.now() - this.loadingStartedAt);
     if (remaining > 0) {
@@ -1292,7 +1351,7 @@ export class Game {
         <header class="hud is-hidden" aria-live="polite">
           <div class="hud-brand"><span>STARBOUND</span><b>SPRINT</b></div>
           <div class="hud-route"><span class="route-label">CURRENT ORBIT</span><strong class="hud-planet"></strong></div>
-          <div class="hud-stats"><span class="coin-count"></span><span class="health-count"></span></div>
+          <div class="hud-stats"><span class="coin-count"></span><span class="health-count"></span><span class="relic-count is-hidden" aria-label="Aurora Crown relics collected"></span></div>
           <button class="mute-button" type="button" aria-pressed="false">SOUND ON</button>
           <section class="mission-card"><span class="mission-label">OBJECTIVE</span><p class="mission-copy"></p></section>
           <section class="boss-card is-hidden" aria-live="polite"><div class="boss-card-heading"><span class="mission-label">CROWN WARDEN</span><strong class="boss-meter-text"></strong></div><div class="boss-meter"><i class="boss-meter-fill"></i></div></section>

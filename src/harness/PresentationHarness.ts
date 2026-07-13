@@ -222,7 +222,8 @@ export class PresentationHarness {
   private async loadAssets(): Promise<void> {
     const manifest = await this.loadManifest();
     const models = (manifest?.assets ?? []).filter((asset) => asset.kind === 'model/gltf-binary' && asset.url);
-    const characterAsset = models.find((asset) => /character|rogue|hero/i.test(`${asset.id} ${asset.url}`));
+    const characterAsset = models.find((asset) => asset.id === 'quaternius-hazmat')
+      ?? models.find((asset) => /character|rogue|hero/i.test(`${asset.id} ${asset.url}`));
     const crownAsset = models.find((asset) => /crown|relic|aurora/i.test(`${asset.id} ${asset.url}`));
     const portalAsset = models.find((asset) => /portal|gate/i.test(`${asset.id} ${asset.url}`));
 
@@ -252,7 +253,7 @@ export class PresentationHarness {
     this.stations[2].group.add(defeatPatch);
     const defeat = await this.loadOrFallbackCharacter(characterAsset?.url);
     this.placeCharacterOnPatch(defeat, defeatPatch, 'Death_A');
-    const deathAction = this.findAction(defeat, ['Death_A', 'Death_B', 'Hit_A']);
+    const deathAction = this.findAction(defeat, ['Death_A', 'Death_B', 'Death', 'Hit_A', 'HitReact']);
     if (deathAction) {
       deathAction.reset().play();
       deathAction.time = deathAction.getClip().duration * 0.96;
@@ -303,6 +304,13 @@ export class PresentationHarness {
           node.castShadow = false;
           node.receiveShadow = false;
         }
+        // The Quaternius hazmat file ships a complete firearm shelf in one
+        // scene. Hide those variants in the review room just as the game
+        // loader does, so the character silhouette is judged without a weapon
+        // pile-up.
+        if (/^(Revolver|Sniper|Pistol|SMG|GrenadeLauncher|ShortCannon|Shotgun|RocketLauncher|AK|Shovel|Knife)/.test(node.name)) {
+          node.visible = false;
+        }
       });
       return { root: gltf.scene, mixer, clips, source: url };
     } catch {
@@ -324,7 +332,9 @@ export class PresentationHarness {
     const patchRadius = 1.22;
     normalized.position.set(patch.position.x, patch.position.y + patchRadius * 2 + 0.015, patch.position.z);
     normalized.rotation.set(0, Math.PI, 0);
-    const action = this.findAction(model, [clipName, clipName === 'Death_A' ? 'Death_B' : 'Cheer']);
+    const action = this.findAction(model, clipName === 'Death_A'
+      ? ['Death_A', 'Death_B', 'Death', 'Hit_A', 'HitReact']
+      : ['Cheer', 'Wave', 'Dance', 'Victory']);
     if (action) {
       action.reset().setLoop(THREE.LoopRepeat, Infinity).play();
       if (clipName === 'Death_A') action.setLoop(THREE.LoopOnce, 1);
@@ -333,7 +343,11 @@ export class PresentationHarness {
 
   private findAction(model: LoadedModel, names: string[]): THREE.AnimationAction | undefined {
     if (!model.mixer) return undefined;
-    const clip = names.map((name) => model.clips.get(name)).find((candidate): candidate is THREE.AnimationClip => Boolean(candidate));
+    const normalizedNames = names.map((name) => name.toLowerCase().replace(/[^a-z0-9]/g, ''));
+    const clip = [...model.clips.values()].find((candidate) => {
+      const clipName = candidate.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+      return normalizedNames.some((name) => clipName === name || clipName.endsWith(name));
+    });
     return clip ? model.mixer.clipAction(clip) : undefined;
   }
 
