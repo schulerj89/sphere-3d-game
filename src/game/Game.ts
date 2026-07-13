@@ -693,7 +693,11 @@ export class Game {
     this.cinematicOverlay.classList.add('is-active', 'is-defeat');
     this.defeatRetryButton.parentElement?.classList.remove('is-visible');
     this.hud.classList.add('is-hidden');
-    this.input?.setVisible(false);
+    // Remove the shadow-DOM touch layer completely for the defeat overlay. A
+    // transparent host can otherwise sit above the retry CTA in mobile WebKit
+    // hit testing even when pointer-events is disabled.
+    this.input?.destroy();
+    this.input = undefined;
     this.setCinematicCopy('STARLIGHT DOWN', 'The rescue beacon is calling Nova home.');
     this.audio.setBossTheme(false);
     this.audio.setCinematic(true);
