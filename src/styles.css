@@ -470,7 +470,8 @@ button {
 }
 
 .start-button,
-.restart-button {
+.restart-button,
+.defeat-retry-button {
   min-width: min(330px, 92%);
   padding: 16px 26px;
   border: 2px solid rgba(255, 247, 199, 0.88);
@@ -489,11 +490,14 @@ button {
 .start-button span { color: #f06931; font-size: 1.25em; }
 
 .start-button:hover,
-.restart-button:hover { filter: brightness(1.08); transform: translateY(-2px); }
+.restart-button:hover,
+.defeat-retry-button:hover { filter: brightness(1.08); transform: translateY(-2px); }
 .start-button:active,
-.restart-button:active { transform: translateY(5px); box-shadow: inset 0 2px 0 #fffde5, 0 3px 0 #9c3e2c, 0 8px 19px rgba(0, 0, 0, 0.35); }
+.restart-button:active,
+.defeat-retry-button:active { transform: translateY(5px); box-shadow: inset 0 2px 0 #fffde5, 0 3px 0 #9c3e2c, 0 8px 19px rgba(0, 0, 0, 0.35); }
 .start-button:focus-visible,
 .restart-button:focus-visible,
+.defeat-retry-button:focus-visible,
 .mute-button:focus-visible { outline: 3px solid #8eeaff; outline-offset: 4px; }
 
 .controls-copy {
@@ -554,6 +558,9 @@ button {
 .cinematic-overlay p { margin: 0; color: #c0f4ff; font-family: 'Bungee', Impact, sans-serif; font-size: clamp(1.2rem, 4vw, 2.6rem); letter-spacing: 0.08em; }
 .cinematic-overlay span { color: #fff7c9; font-size: clamp(0.68rem, 1.8vw, 0.88rem); font-weight: 700; letter-spacing: 0.12em; }
 .cinematic-overlay.is-defeat {
+  align-content: start;
+  padding-top: max(16vh, 132px);
+  pointer-events: auto;
   background: radial-gradient(ellipse at 50% 48%, rgba(255, 79, 130, 0.14), transparent 48%);
 }
 .cinematic-overlay.is-defeat p {
@@ -562,6 +569,31 @@ button {
   animation: defeat-title-pulse 1.35s ease-in-out infinite;
 }
 .cinematic-overlay.is-defeat span { color: #ffe2e9; }
+.defeat-actions {
+  position: absolute;
+  right: 0;
+  bottom: max(14vh, 108px);
+  left: 0;
+  display: grid;
+  justify-items: center;
+  opacity: 0;
+  transform: translateY(12px) scale(0.94);
+  pointer-events: none;
+  transition: opacity 300ms ease, transform 300ms ease;
+}
+.defeat-actions.is-visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+.defeat-retry-button {
+  min-width: min(260px, 82vw);
+  padding: 13px 23px;
+  border-color: rgba(255, 226, 237, 0.92);
+  color: #3b1231;
+  background: linear-gradient(135deg, #ffeef5 0%, #ffb1c8 49%, #ff698f 100%);
+  box-shadow: inset 0 2px 0 #fff8fc, 0 7px 0 #8b244d, 0 13px 27px rgba(29, 0, 17, 0.42), 0 0 33px rgba(255, 89, 141, 0.3);
+}
 .cinematic-overlay.is-boss-victory {
   background: radial-gradient(ellipse at 50% 48%, rgba(189, 125, 255, 0.2), transparent 52%);
 }

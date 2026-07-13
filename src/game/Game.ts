@@ -25,7 +25,9 @@ interface DefeatCinematic {
   readonly origin: THREE.Vector3;
   readonly normal: THREE.Vector3;
   readonly heading: THREE.Vector3;
+  readonly fallAxis: THREE.Vector3;
   elapsed: number;
+  retryReady: boolean;
 }
 
 interface BossVictoryCinematic {
@@ -144,6 +146,7 @@ export class Game {
   private cinematicOverlay!: HTMLElement;
   private cinematicTitle!: HTMLElement;
   private cinematicSubtitle!: HTMLElement;
+  private defeatRetryButton!: HTMLButtonElement;
   private completeScreen!: HTMLElement;
   private planetName!: HTMLElement;
   private missionText!: HTMLElement;
@@ -175,6 +178,7 @@ export class Game {
     this.cinematicOverlay = this.element('.cinematic-overlay');
     this.cinematicTitle = this.element('.cinematic-overlay p');
     this.cinematicSubtitle = this.element('.cinematic-overlay span');
+    this.defeatRetryButton = this.element<HTMLButtonElement>('.defeat-retry-button');
     this.completeScreen = this.element('.complete-screen');
     this.planetName = this.element('.hud-planet');
     this.missionText = this.element('.mission-copy');
@@ -232,6 +236,7 @@ export class Game {
   private bindUi(): void {
     this.element<HTMLButtonElement>('.start-button').addEventListener('click', this.begin);
     this.element<HTMLButtonElement>('.restart-button').addEventListener('click', () => window.location.reload());
+    this.defeatRetryButton.addEventListener('click', this.retryRun);
     this.muteButton.addEventListener('click', () => {
       this.muted = this.audio.toggleMute();
       this.muteButton.textContent = this.muted ? 'SOUND OFF' : 'SOUND ON';
@@ -633,15 +638,21 @@ export class Game {
   }
 
   private beginDefeat(): void {
+    const facing = forwardOnNormal(this.playerHeading, WORLD_UP, new THREE.Vector3(0, 0, 1));
+    const fallAxis = new THREE.Vector3().crossVectors(WORLD_UP, facing).normalize();
+    if (fallAxis.lengthSq() < 0.001) fallAxis.set(1, 0, 0);
     this.phase = 'defeat';
     this.defeatCinematic = {
       origin: this.playerPosition.clone(),
       normal: this.playerNormal.clone(),
-      heading: this.playerHeading.clone(),
+      heading: facing,
+      fallAxis,
       elapsed: 0,
+      retryReady: false,
     };
     this.defeatFx.visible = true;
     this.cinematicOverlay.classList.add('is-active', 'is-defeat');
+    this.defeatRetryButton.parentElement?.classList.remove('is-visible');
     this.hud.classList.add('is-hidden');
     this.input?.setVisible(false);
     this.setCinematicCopy('STARLIGHT DOWN', 'The rescue beacon is calling Nova home.');
@@ -653,28 +664,33 @@ export class Game {
     const cinematic = this.defeatCinematic;
     if (!cinematic) return;
     cinematic.elapsed += delta;
-    const duration = 3.9;
+    // Give the loss beat enough time to complete a readable 360-degree camera
+    // orbit before handing control back to the player through the retry CTA.
+    const duration = 5.2;
     const raw = THREE.MathUtils.clamp(cinematic.elapsed / duration, 0, 1);
     const normal = cinematic.normal;
     const heading = cinematic.heading;
     const side = new THREE.Vector3().crossVectors(normal, heading).normalize();
     if (side.lengthSq() < 0.001) side.set(1, 0, 0);
 
-    // Impact, weightless drift, then a soft beacon pull. The hero stays on
-    // screen for the entire beat so the loss reads as a character moment.
+    // Impact, a visible backward fall, then a quiet final pose. The model uses
+    // a world-up frame during this beat so a side-facing planet cannot turn the
+    // character upside down while the camera makes its full orbit.
     const impact = 1 - smoothstep(Math.min(1, raw / 0.2));
-    const drift = smoothstep(Math.min(1, Math.max(0, (raw - 0.16) / 0.56)));
-    const returnBeat = smoothstep(Math.min(1, Math.max(0, (raw - 0.72) / 0.28)));
-    const lift = THREE.MathUtils.lerp(0.12, 2.65, drift) * (1 - returnBeat * 0.42);
+    const fall = smoothstep(Math.min(1, Math.max(0, (raw - 0.08) / 0.46)));
+    const settle = smoothstep(Math.min(1, Math.max(0, (raw - 0.72) / 0.28)));
+    const lift = THREE.MathUtils.lerp(0.22, 0.08, settle) + (1 - fall) * 0.34;
     const shake = Math.sin(this.elapsed * 56) * impact * 0.08;
     const position = cinematic.origin.clone()
       .addScaledVector(normal, lift + shake)
+      .addScaledVector(heading, -fall * 0.92)
       .addScaledVector(side, Math.sin(this.elapsed * 8) * impact * 0.08);
     this.hero.group.position.copy(position);
-    const facing = heading.clone().applyAxisAngle(normal, THREE.MathUtils.lerp(0, Math.PI * 1.35, drift));
-    this.hero.group.quaternion.copy(surfaceOrientation(normal, facing));
-    const scale = THREE.MathUtils.lerp(1.02, 0.72, returnBeat);
-    this.hero.group.scale.setScalar(scale);
+    const baseOrientation = surfaceOrientation(WORLD_UP, heading);
+    const fallRotation = new THREE.Quaternion().setFromAxisAngle(cinematic.fallAxis, -fall * Math.PI * 0.42);
+    baseOrientation.premultiply(fallRotation);
+    this.hero.group.quaternion.copy(baseOrientation);
+    this.hero.group.scale.setScalar(THREE.MathUtils.lerp(1.02, 0.96, settle));
     this.hero.setRunCycle(0, this.elapsed, true);
     this.hero.setHurt(raw < 0.52 && Math.floor(this.elapsed * 14) % 2 === 0);
     if (raw < 0.48) this.setCharacterAnimation('hurt');
@@ -683,16 +699,21 @@ export class Game {
     this.defeatFx.position.copy(fxPosition);
     this.defeatFx.quaternion.copy(surfaceOrientation(normal, heading));
     const ringPulse = 1 + Math.sin(this.elapsed * 7) * 0.12;
-    this.defeatRing.scale.setScalar(ringPulse + drift * 1.9);
-    this.defeatCore.scale.setScalar(1 + drift * 1.8);
-    this.defeatRingMaterial.opacity = THREE.MathUtils.clamp(0.16 + drift * 0.55 - returnBeat * 0.34, 0, 0.72);
-    this.defeatCoreMaterial.opacity = THREE.MathUtils.clamp(0.12 + drift * 0.5 - returnBeat * 0.42, 0, 0.7);
+    this.defeatRing.scale.setScalar(ringPulse + fall * 1.9);
+    this.defeatCore.scale.setScalar(1 + fall * 1.8);
+    this.defeatRingMaterial.opacity = THREE.MathUtils.clamp(0.16 + fall * 0.55 - settle * 0.34, 0, 0.72);
+    this.defeatCoreMaterial.opacity = THREE.MathUtils.clamp(0.12 + fall * 0.5 - settle * 0.42, 0, 0.7);
 
+    // Orbit in the planet's tangent plane while keeping a constant outward
+    // offset. This completes one full revolution and avoids clipping through
+    // the sphere even when Nova falls on a side-facing latitude.
+    const orbit = raw * Math.PI * 2;
+    const orbitRadius = THREE.MathUtils.lerp(8.8, 10.4, fall);
     const cameraPosition = position.clone()
-      .addScaledVector(normal, THREE.MathUtils.lerp(5.7, 12.8, drift))
-      .addScaledVector(heading, THREE.MathUtils.lerp(3.8, -1.5, drift))
-      .addScaledVector(side, Math.sin(this.elapsed * 1.6) * THREE.MathUtils.lerp(0.8, 4.8, drift));
-    const cameraTarget = position.clone().addScaledVector(normal, 1.05);
+      .addScaledVector(normal, THREE.MathUtils.lerp(5.2, 6.2, fall))
+      .addScaledVector(heading, Math.sin(orbit) * orbitRadius)
+      .addScaledVector(side, Math.cos(orbit) * orbitRadius);
+    const cameraTarget = position.clone().addScaledVector(WORLD_UP, 1.02);
     this.camera.position.lerp(cameraPosition, 1 - Math.exp(-4.6 * delta));
     this.camera.up.copy(WORLD_UP);
     this.camera.lookAt(cameraTarget);
@@ -700,29 +721,25 @@ export class Game {
     if (raw < 0.33) {
       this.setCinematicCopy('STARLIGHT DOWN', 'Nova has fallen.');
     } else if (raw < 0.76) {
-      this.setCinematicCopy('RESCUE BEACON', 'Hold on to the light.');
+      this.setCinematicCopy('LAST LIGHT', 'Nova is out of lives.');
     } else {
-      this.setCinematicCopy('REENTRY', 'The run continues.');
+      this.setCinematicCopy('RUN ENDED', 'Retry to return to the start beacon.');
     }
 
-    if (raw < 1) return;
-    this.health = 3;
-    this.hero.group.scale.setScalar(1);
-    this.defeatFx.visible = false;
-    this.defeatRingMaterial.opacity = 0;
-    this.defeatCoreMaterial.opacity = 0;
-    this.placePlayerAt(this.activePlanet, this.activePlanet.definition.startNormal);
-    this.defeatCinematic = undefined;
-    this.phase = 'playing';
-    this.cinematicOverlay.classList.remove('is-active', 'is-defeat');
-    this.hud.classList.remove('is-hidden');
-    this.input?.setVisible(true);
-    this.audio.setCinematic(false);
-    this.audio.setBossTheme(this.activePlanet.isBossPlanet);
-    this.setCharacterAnimation('idle');
-    this.setStatus('Rescue star restored you to the start beacon.');
-    this.updateUi();
+    if (raw < 1 || cinematic.retryReady) return;
+    cinematic.retryReady = true;
+    this.defeatRetryButton.parentElement?.classList.add('is-visible');
+    this.defeatRetryButton.focus({ preventScroll: true });
   }
+
+  private readonly retryRun = (): void => {
+    // Leave a development defeat route before reloading; otherwise the QA
+    // harness would immediately replay the cinematic instead of testing the
+    // actual retry path.
+    const url = new URL(window.location.href);
+    url.searchParams.delete('qa');
+    window.location.assign(`${url.pathname}${url.search}${url.hash}`);
+  };
 
   private beginBossVictory(finale = this.activePlanet.allRelicsCollected, source: 'rings' | 'boss' = 'boss'): void {
     const normal = this.playerNormal.clone().normalize();
@@ -828,7 +845,7 @@ export class Game {
   private configureQaScenario(): void {
     if (!import.meta.env.DEV) return;
     const scenario = new URLSearchParams(window.location.search).get('qa');
-    if (scenario !== 'boss' && scenario !== 'victory' && scenario !== 'crown' && scenario !== 'launch') return;
+    if (scenario !== 'boss' && scenario !== 'victory' && scenario !== 'crown' && scenario !== 'launch' && scenario !== 'defeat') return;
     if (scenario === 'launch') {
       const source = this.planets[0];
       const destination = this.planets[1];
@@ -842,6 +859,18 @@ export class Game {
       this.coins = Math.max(this.coins, source.coinTarget);
       this.placePlayerAt(source, source.definition.launchNormal);
       this.beginLaunch();
+      return;
+    }
+    if (scenario === 'defeat') {
+      const source = this.planets[0];
+      if (!source) return;
+      this.activePlanet = source;
+      for (const planet of this.planets) planet.group.visible = planet === source;
+      this.placePlayerAt(source, source.definition.startNormal);
+      this.cameraDistance = 13;
+      this.health = 0;
+      this.setStatus('QA defeat cinematic: Nova has no lives left.');
+      this.beginDefeat();
       return;
     }
     const finalPlanet = this.planets[this.planets.length - 1];
@@ -1137,7 +1166,7 @@ export class Game {
           <p class="status-copy"></p>
           <p class="debug-panel" aria-live="off"></p>
         </header>
-        <section class="cinematic-overlay" aria-live="assertive"><p>ORBITAL SLINGSHOT</p><span>Hold tight, runner.</span></section>
+        <section class="cinematic-overlay" aria-live="assertive"><p>ORBITAL SLINGSHOT</p><span>Hold tight, runner.</span><div class="defeat-actions"><button class="defeat-retry-button" type="button">RETRY RUN</button></div></section>
         <section class="title-screen is-hidden">
           <div class="title-orbit orbit-one"></div><div class="title-orbit orbit-two"></div>
           <div class="title-content">
