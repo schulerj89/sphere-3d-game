@@ -419,12 +419,14 @@ function createLaunchPad(color: number): THREE.Group {
     new THREE.TorusGeometry(0.78, 0.045, 8, 40),
     new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.58, blending: THREE.AdditiveBlending, depthWrite: false }),
   );
+  energyRing.name = 'launch-energy-ring';
   energyRing.rotation.x = Math.PI / 2;
   energyRing.position.y = 0.08;
   const energyCore = new THREE.Mesh(
     new THREE.CircleGeometry(0.72, 32),
     new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.14, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }),
   );
+  energyCore.name = 'launch-energy-circle';
   energyCore.rotation.x = -Math.PI / 2;
   energyCore.position.y = 0.065;
   const energy = new THREE.Group();
@@ -905,9 +907,21 @@ export class Planet {
         relic.mesh.scale.setScalar(pulse);
       }
     }
-    const launchPulse = this.isLaunchReady ? 1.35 + Math.sin(this.elapsed * 5) * 0.45 : 0.38;
+    // The gate is a fixed landmark on each sphere. Only its energy circle
+    // responds to progression; rotating the whole launch pad made the portal
+    // drift under the character and read like a moving hazard.
+    const charged = this.isLaunchReady;
+    const launchPulse = charged ? 1.35 + Math.sin(this.elapsed * 5) * 0.45 : 0.18;
     this.launchMaterial.emissiveIntensity = launchPulse;
-    this.launchPad.rotation.y += delta * (this.isLaunchReady ? 0.9 : 0.22);
+    const energyRing = this.launchPad.getObjectByName('launch-energy-ring') as THREE.Mesh<THREE.TorusGeometry, THREE.MeshBasicMaterial> | undefined;
+    const energyCircle = this.launchPad.getObjectByName('launch-energy-circle') as THREE.Mesh<THREE.CircleGeometry, THREE.MeshBasicMaterial> | undefined;
+    if (energyRing && energyCircle) {
+      const pulse = charged ? 0.74 + Math.sin(this.elapsed * 5) * 0.2 : 0.035;
+      energyRing.material.opacity = THREE.MathUtils.clamp(pulse, 0.02, 0.94);
+      energyCircle.material.opacity = charged ? 0.16 + Math.sin(this.elapsed * 5) * 0.05 : 0.012;
+      energyRing.scale.setScalar(charged ? 1 + Math.sin(this.elapsed * 5) * 0.04 : 1);
+      energyCircle.scale.setScalar(charged ? 1 + Math.sin(this.elapsed * 5) * 0.025 : 1);
+    }
   }
 
   /**

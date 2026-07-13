@@ -28,6 +28,7 @@ interface DefeatCinematic {
   readonly fallAxis: THREE.Vector3;
   elapsed: number;
   retryReady: boolean;
+  animationFrozen: boolean;
 }
 
 interface BossVictoryCinematic {
@@ -48,6 +49,11 @@ interface StarboundDebugSnapshot {
   readonly planetsCompleted: number;
   readonly loadedAssetIds: readonly string[];
   readonly assetErrors: readonly string[];
+  readonly launch: {
+    readonly ready: boolean;
+    readonly portalVisible: boolean;
+    readonly energyOpacity: number;
+  };
   readonly boss?: {
     readonly health: number;
     readonly maxHealth: number;
@@ -692,6 +698,7 @@ export class Game {
       fallAxis,
       elapsed: 0,
       retryReady: false,
+      animationFrozen: false,
     };
     this.defeatFx.visible = true;
     this.cinematicOverlay.classList.add('is-active', 'is-defeat');
@@ -705,6 +712,25 @@ export class Game {
     this.setCinematicCopy('STARLIGHT DOWN', 'The rescue beacon is calling Nova home.');
     this.audio.setBossTheme(false);
     this.audio.setCinematic(true);
+    // The authored hit clip is a loop by default. Defeat is a single beat,
+    // so play it once and hold its final frame instead of letting the rig
+    // keep cycling while the camera finishes its orbit.
+    const hurtAction = this.modelActions.get('hurt');
+    if (hurtAction) {
+      this.activeAnimation?.fadeOut(0.14);
+      hurtAction.reset();
+      hurtAction.setLoop(THREE.LoopOnce, 1);
+      hurtAction.clampWhenFinished = true;
+      hurtAction.setEffectiveTimeScale(1);
+      hurtAction.setEffectiveWeight(1);
+      hurtAction.fadeIn(0.14).play();
+      this.activeAnimation = hurtAction;
+    } else {
+      // If the external rig has no hurt clip, stop the previous looping clip
+      // so the procedural fall pose remains completely still.
+      this.activeAnimation?.stop();
+      this.activeAnimation = undefined;
+    }
   }
 
   private updateDefeat(delta: number): void {
@@ -739,9 +765,10 @@ export class Game {
     baseOrientation.premultiply(fallRotation);
     this.hero.group.quaternion.copy(baseOrientation);
     this.hero.group.scale.setScalar(THREE.MathUtils.lerp(1.02, 0.96, settle));
-    this.hero.setRunCycle(0, this.elapsed, true);
+    // The imported rig supplies the one-shot fall. The procedural fallback is
+    // deliberately held in a grounded pose so no limb keeps oscillating.
+    this.hero.setRunCycle(0, this.elapsed, false);
     this.hero.setHurt(raw < 0.52 && Math.floor(this.elapsed * 14) % 2 === 0);
-    if (raw < 0.48) this.setCharacterAnimation('hurt');
 
     const fxPosition = this.activePlanet.worldPosition(normal, 0.12);
     this.defeatFx.position.copy(fxPosition);
@@ -774,6 +801,12 @@ export class Game {
       this.setCinematicCopy('RUN ENDED', 'Retry to return to the start beacon.');
     }
 
+    if (raw >= 1 && !cinematic.animationFrozen) {
+      // ClampWhenFinished handles normal clips; pausing explicitly also
+      // covers rigs whose mixer keeps evaluating a finished action.
+      if (this.activeAnimation) this.activeAnimation.paused = true;
+      cinematic.animationFrozen = true;
+    }
     if (raw < 1 || cinematic.retryReady) return;
     cinematic.retryReady = true;
     this.defeatRetryButton.parentElement?.classList.add('is-visible');
@@ -798,7 +831,10 @@ export class Game {
     heading.normalize();
     this.phase = 'bossVictory';
     this.bossVictoryCinematic = {
-      origin: this.playerPosition.clone(),
+      // Snap the reward beat to the planet surface even when the relic was
+      // collected during a jump. The hero's model origin is at its feet, so
+      // this keeps the celebration visibly planted instead of hovering.
+      origin: this.activePlanet.worldPosition(normal, 0.08),
       normal,
       heading,
       source,
@@ -827,27 +863,27 @@ export class Game {
     const beat = smoothstep(raw);
     const normal = cinematic.normal;
     const heading = cinematic.heading;
-    const position = cinematic.origin.clone().addScaledVector(normal, 0.28 + Math.sin(this.elapsed * 3.2) * 0.08);
+    // Keep Nova's feet on the sphere for the whole reward beat. The authored
+    // celebrate clip provides the motion; moving the root along the normal
+    // made the character float above (or clip into) side-facing planets.
+    const position = cinematic.origin.clone();
     this.hero.group.position.copy(position);
-    // Keep the reward pose aligned to the real horizon instead of the planet
-    // tangent. A tangent frame is physically correct on the sphere, but at a
-    // side-facing arena it can put Nova's feet toward the top of the screen.
-    // This stable world-up frame keeps the character readable through the
-    // whole crown beat while the stored heading preserves the D-pad facing.
-    const cinematicForward = forwardOnNormal(heading, WORLD_UP, new THREE.Vector3(0, 0, 1));
-    this.hero.group.quaternion.copy(surfaceOrientation(WORLD_UP, cinematicForward));
+    // Align local up to the sphere normal: this is the character's actual
+    // ground plane, so the celebration stays right-side-up on every latitude.
+    const cinematicForward = forwardOnNormal(heading, normal, new THREE.Vector3(0, 0, 1));
+    this.hero.group.quaternion.copy(surfaceOrientation(normal, cinematicForward));
     this.hero.setRunCycle(0, this.elapsed, false);
 
     const orbit = this.elapsed * 0.9;
-    const cameraSide = new THREE.Vector3().crossVectors(WORLD_UP, cinematicForward).normalize();
+    const cameraSide = new THREE.Vector3().crossVectors(normal, cinematicForward).normalize();
     if (cameraSide.lengthSq() < 0.001) cameraSide.set(1, 0, 0);
     const cameraPosition = position.clone()
-      .addScaledVector(WORLD_UP, THREE.MathUtils.lerp(7.8, 9.6, beat))
+      .addScaledVector(normal, THREE.MathUtils.lerp(7.8, 9.6, beat))
       .addScaledVector(cameraSide, Math.sin(orbit) * THREE.MathUtils.lerp(2.8, 4.8, beat))
       .addScaledVector(cinematicForward, 7.8 + Math.cos(orbit) * 2.2);
-    const cameraTarget = position.clone().addScaledVector(WORLD_UP, 1.1);
+    const cameraTarget = position.clone().addScaledVector(normal, 1.1);
     this.camera.position.lerp(cameraPosition, 1 - Math.exp(-4.6 * delta));
-    this.camera.up.copy(WORLD_UP);
+    this.camera.up.copy(normal);
     this.camera.lookAt(cameraTarget);
 
     if (!cinematic.finale && raw < 0.34) {
@@ -1065,6 +1101,7 @@ export class Game {
 
   private debugSnapshot(): StarboundDebugSnapshot {
     const info = this.renderer.info;
+    const launchEnergy = this.activePlanet.launchPad.getObjectByName('launch-energy-circle') as THREE.Mesh<THREE.CircleGeometry, THREE.MeshBasicMaterial> | undefined;
     return {
       phase: this.phase,
       currentPlanet: this.activePlanet.definition.id,
@@ -1074,6 +1111,11 @@ export class Game {
       planetsCompleted: this.planets.indexOf(this.activePlanet),
       loadedAssetIds: this.loadedAssetIds,
       assetErrors: this.assetErrors,
+      launch: {
+        ready: this.activePlanet.isLaunchReady,
+        portalVisible: this.activePlanet.launchPad.visible,
+        energyOpacity: launchEnergy?.material.opacity ?? 0,
+      },
       boss: this.activePlanet.boss
         ? {
           health: this.activePlanet.boss.health,
