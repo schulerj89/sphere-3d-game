@@ -13,8 +13,9 @@ cinematic orbital transfers.
   camera that follows the planet curvature.
 - Touch-first controls: left joystick, right-side camera drag, pinch zoom, and
   a large JUMP button; WASD/arrows and Space also work on desktop.
-- A CC0 KayKit Rogue model with idle/run/jump/pounce/hurt animation clips,
-  CC0 SFX/fallback music, and an embedded Eleven Music v2 gameplay loop.
+- A CC0 Quaternius Hazmat model with idle/run/jump/pounce/hurt animation clips,
+  a single procedural mallet, CC0 SFX/fallback music, and an embedded Eleven
+  Music v2 gameplay loop.
 
 For render and asset counters, append `?debug=1` to the local or hosted URL.
 
@@ -27,6 +28,13 @@ celebration ground contact, one-shot defeat freeze, and crown silhouette in a
 single deterministic camera view. It discovers character/crown GLBs from
 `public/assets/asset-manifest.json` and reports when a procedural fallback is
 being reviewed.
+
+The combat and reward beats have a separate deterministic review room at
+`?harness=weapon-cinematics`. Use its controls to capture the mallet-only
+attack, pounce-safe weapon state, Aurora Crown close-up/return, and portal
+activation FX without steering the live game camera. See
+[docs/qa/weapon-cinematic-review.md](docs/qa/weapon-cinematic-review.md) for
+the screenshot matrix.
 
 ## Local development
 

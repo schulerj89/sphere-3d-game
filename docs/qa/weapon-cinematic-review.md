@@ -22,6 +22,8 @@ Use a 1280×720 browser viewport and capture these stable names:
 - `weapon-crown-closeup.png` at `CROWN · CLOSE-UP / ROTATING`
 - `weapon-portal-closeup.png` at `PORTAL · CIRCLE ILLUMINATED / FX`
 - `weapon-cinematic-return.png` after each cinematic reports `camera returned to Nova`
+- `crown-available-closeup.png` from the integrated `?qa=crown-available` route
+- `portal-activation-integration.png` from the integrated `?qa=portal` route
 
 The browser console should contain no errors or warnings. The loaded status
 should name `quaternius-hazmat` and `quaternius-aurora-crown`; a procedural
@@ -42,3 +44,6 @@ return phases for screenshot review.
 - `npm run build` passed (TypeScript strict/no-unused checks and Vite bundle).
 - New route bundle: `WeaponCinematicHarness-*.js`.
 - Run `node C:/Users/joshs/.codex/skills/game-screenshot-qa/scripts/screenshot_manifest.mjs docs/qa` after captures to record image dimensions and hashes.
+- The integrated routes freeze the live game state, so they also verify that the
+  actual player camera returns after the close-up rather than only testing the
+  isolated harness.

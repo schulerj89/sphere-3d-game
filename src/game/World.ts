@@ -1206,7 +1206,7 @@ export type HeroWeaponAnimation = 'equip' | 'attack';
  * hidden here (as well as in Game's loader) makes the mallet the only readable
  * weapon in both the authored and procedural fallback presentations.
  */
-const HERO_AUTHORED_WEAPON_PATTERN = /^(Revolver|Sniper|Pistol|SMG|GrenadeLauncher|ShortCannon|Shotgun|RocketLauncher|AK|Shovel|Knife)/;
+const HERO_AUTHORED_WEAPON_PATTERN = /^(Revolver|Sniper|Pistol|SMG|GrenadeLauncher|ShortCannon|Shotgun|RocketLauncher|AK|Shovel|Knife|1H_Crossbow|2H_Crossbow|Knife_Offhand|Throwable)/;
 
 export interface HeroVisual {
   readonly group: THREE.Group;

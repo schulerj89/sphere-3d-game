@@ -409,6 +409,8 @@ export class WeaponCinematicHarness {
     this.elapsed += delta;
     this.phaseAge += delta;
     this.updateDemo(delta);
+    this.root.dataset.weaponPhase = this.phase;
+    this.root.dataset.weaponPhaseAge = this.phaseAge.toFixed(2);
     this.mixers.forEach((mixer) => mixer.update(delta));
     this.renderer.render(this.scene, this.camera);
   };
@@ -418,13 +420,17 @@ export class WeaponCinematicHarness {
     if (!hero) return;
     const idleCamera = new THREE.Vector3(0.8, 3.4, 10.3);
     const idleTarget = new THREE.Vector3(0.35, 1.35, 0);
-    const crownCamera = new THREE.Vector3(0.85, 2.8, 4.05);
-    const crownTarget = this.crown.position.clone().add(new THREE.Vector3(0, 0.24, 0));
+    // Leave enough headroom for the fixed QA panel while keeping the crown a
+    // genuine close-up rather than letting the mesh disappear behind text.
+    const crownCamera = new THREE.Vector3(0.85, 3.25, 5.15);
+    const crownTarget = this.crown.position.clone().add(new THREE.Vector3(0, 0.46, 0));
     const portalCamera = new THREE.Vector3(3.05, 2.7, 4.05);
     const portalTarget = this.portal.position.clone().add(new THREE.Vector3(0, 0.48, 0));
 
     if (this.phase === 'attack') {
-      const progress = THREE.MathUtils.clamp(this.phaseAge / 1.22, 0, 1);
+      // Keep the review beat long enough for a remote screenshot round-trip
+      // to catch the mallet in flight instead of only the returned idle pose.
+      const progress = THREE.MathUtils.clamp(this.phaseAge / 8, 0, 1);
       const arc = Math.sin(Math.min(1, progress) * Math.PI);
       this.mallet.position.set(this.malletRest.x + progress * 1.98, this.malletRest.y + arc * 0.54, this.malletRest.z + progress * 0.3);
       this.mallet.rotation.z = -0.24 + progress * 6.2;
@@ -444,8 +450,9 @@ export class WeaponCinematicHarness {
         this.mallet.rotation.set(0, 0, -0.24);
         this.status.textContent = 'Ready · mallet returned to its single slot; try POUNCE to verify it stays quiet.';
       }
+      return;
     } else if (this.phase === 'pounce') {
-      const progress = THREE.MathUtils.clamp(this.phaseAge / 0.95, 0, 1);
+      const progress = THREE.MathUtils.clamp(this.phaseAge / 4, 0, 1);
       this.pounceOffset = Math.sin(progress * Math.PI) * 0.84;
       hero.position.y = 0.19 + this.pounceOffset;
       this.mallet.position.copy(this.malletRest).add(new THREE.Vector3(0, this.pounceOffset, 0));
@@ -457,6 +464,7 @@ export class WeaponCinematicHarness {
         this.phaseAge = 0;
         this.status.textContent = 'Pounce complete · no weapon animation was activated.';
       }
+      return;
     } else if (this.phase === 'crown-approach' || this.phase === 'crown-close' || this.phase === 'crown-return') {
       const total = 3.7;
       const progress = THREE.MathUtils.clamp(this.phaseAge / total, 0, 1);

@@ -12,9 +12,6 @@ export class AssetHarness {
   private readonly camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
   private renderer!: THREE.WebGLRenderer;
   private status!: HTMLElement;
-  private externalPortal: THREE.Group | undefined;
-  private externalSpin = 0;
-  private lastTimestamp = performance.now();
 
   constructor(private readonly root: HTMLDivElement) {}
 
@@ -154,7 +151,6 @@ export class AssetHarness {
       const holder = new THREE.Group();
       holder.position.x = -3.25;
       holder.add(model);
-      this.externalPortal = holder;
       this.scene.add(holder);
       const triangleCount = this.countTriangles(model);
       this.status.textContent = `Loaded Kenney gate_complex.glb · ${triangleCount.toLocaleString()} triangles · CC0 source · 29.9 KB`;
@@ -175,11 +171,8 @@ export class AssetHarness {
   }
 
   private readonly tick = (): void => {
-    const now = performance.now();
-    const delta = Math.min(Math.max((now - this.lastTimestamp) / 1000, 0), 0.05);
-    this.lastTimestamp = now;
-    this.externalSpin += delta;
-    if (this.externalPortal) this.externalPortal.rotation.y = Math.sin(this.externalSpin * 0.6) * 0.12;
+    // The gate is a static landmark in the game and in the asset review room;
+    // only the runtime energy effects are allowed to animate around it.
     this.camera.lookAt(0, 1.85, 0);
     this.renderer.render(this.scene, this.camera);
   };

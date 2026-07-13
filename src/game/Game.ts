@@ -38,6 +38,8 @@ interface BossVictoryCinematic {
   readonly heading: THREE.Vector3;
   readonly source: 'rings' | 'boss';
   readonly relic?: Planet['relics'][number];
+  /** True when the relic has already been collected; false for an unlock preview. */
+  readonly relicClaimed: boolean;
   readonly finale: boolean;
   readonly focusDuration: number;
   readonly animationDuration: number;
@@ -142,6 +144,7 @@ export class Game {
   private defeatCinematic: DefeatCinematic | undefined;
   private bossVictoryCinematic: BossVictoryCinematic | undefined;
   private readonly portalActivationShown = new WeakSet<Planet>();
+  private readonly crownAvailabilityShown = new WeakSet<Planet>();
   private portalActivationFx: THREE.Group | undefined;
   private elapsed = 0;
   private lastFrameTimestamp = performance.now();
@@ -430,6 +433,7 @@ export class Game {
 
   private collectAndResolveEncounters(): void {
     const launchWasReady = this.activePlanet.isLaunchReady;
+    const crownsReadyBefore = this.activePlanet.relicsReady;
     const collected = this.activePlanet.collectNear(this.playerNormal, 1.24);
     if (collected) {
       this.coins += 1;
@@ -454,6 +458,24 @@ export class Game {
       this.portalActivationShown.add(this.activePlanet);
       this.beginPortalActivation();
       return;
+    }
+
+    // Unlocking the ring crown is a progression payoff in its own right. Stop
+    // once, frame the now-visible relic, and return control before the player
+    // has collected it so the crown remains a deliberate destination.
+    if (collected && crownsReadyBefore === 0 && this.activePlanet.relicsReady > 0
+      && !this.crownAvailabilityShown.has(this.activePlanet)) {
+      const available = this.activePlanet.relics.find((candidate) => (
+        !candidate.collected
+        && (candidate.source === 'rings'
+          ? this.activePlanet.collectedCoins >= this.activePlanet.relicRingTarget
+          : this.activePlanet.isBossDefeated)
+      ));
+      if (available) {
+        this.crownAvailabilityShown.add(this.activePlanet);
+        this.beginBossVictory(false, available.source, available, false);
+        return;
+      }
     }
 
     const relic = this.activePlanet.collectRelicNear(this.playerNormal);
@@ -1021,6 +1043,7 @@ export class Game {
     finale = this.activePlanet.allRelicsCollected,
     source: 'rings' | 'boss' = 'boss',
     relic?: Planet['relics'][number],
+    relicClaimed = true,
   ): void {
     const normal = this.playerNormal.clone().normalize();
     const heading = this.playerHeading.clone().projectOnPlane(normal);
@@ -1045,7 +1068,7 @@ export class Game {
     }
     this.phase = 'bossVictory';
     const focusDuration = relic ? 2.05 : 0;
-    const animationDuration = finale ? 5.8 : 3.6;
+    const animationDuration = relic && !relicClaimed ? 0 : finale ? 5.8 : 3.6;
     this.bossVictoryCinematic = {
       planet: this.activePlanet,
       // Snap the reward beat to the planet surface even when the relic was
@@ -1056,10 +1079,11 @@ export class Game {
       heading,
       source,
       relic,
+      relicClaimed,
       finale,
       focusDuration,
       animationDuration,
-      animationStarted: !relic,
+      animationStarted: !relic || !relicClaimed,
       restoreBossAfterReward,
       elapsed: 0,
     };
@@ -1114,6 +1138,9 @@ export class Game {
       // to the player so the world state still says "claimed".
       cinematic.relic.mesh.visible = inFocus;
       if (inFocus) {
+        // Planet.update() stops animating collected relics. The close-up is
+        // the intentional exception, so rotate the reward mesh explicitly.
+        cinematic.relic.mesh.rotation.y += delta * 2.4;
         const crownNormal = cinematic.relic.normal.clone().normalize();
         const crownPosition = cinematic.planet.worldPosition(crownNormal, 1.28);
         const crownForward = forwardOnNormal(heading, crownNormal, new THREE.Vector3(0, 0, 1));
@@ -1174,6 +1201,29 @@ export class Game {
     }
 
     if (raw < 1) return;
+    if (cinematic.relic && !cinematic.relicClaimed) {
+      // This was an unlock preview, not a pickup. Leave the relic available in
+      // the world and return to the exact player pose without claiming it.
+      cinematic.relic.mesh.visible = true;
+      this.bossVictoryCinematic = undefined;
+      this.hero.group.scale.setScalar(1);
+      this.cinematicOverlay.classList.remove('is-active', 'is-boss-victory');
+      this.phase = 'playing';
+      this.hud.classList.remove('is-hidden');
+      this.input?.setVisible(true);
+      if (cinematic.restoreBossAfterReward && this.activePlanet.boss) {
+        this.activePlanet.boss.mesh.visible = true;
+        const bossArena = this.activePlanet.group.getObjectByName('boss arena');
+        if (bossArena) bossArena.visible = true;
+      }
+      this.cameraDistance = DEFAULT_CAMERA_DISTANCE;
+      this.audio.setCinematic(false);
+      this.audio.setBossTheme(this.activePlanet.isBossPlanet && !this.activePlanet.isBossDefeated);
+      this.setCharacterAnimation('idle');
+      this.setStatus('Aurora Crown available — collect the glowing relic.');
+      this.updateUi();
+      return;
+    }
     if (cinematic.relic) cinematic.relic.mesh.visible = false;
     this.bossVictoryCinematic = undefined;
     this.hero.group.scale.setScalar(1);
@@ -1210,7 +1260,7 @@ export class Game {
   private configureQaScenario(): void {
     if (!import.meta.env.DEV) return;
     const scenario = new URLSearchParams(window.location.search).get('qa');
-    if (scenario !== 'boss' && scenario !== 'victory' && scenario !== 'crown' && scenario !== 'launch' && scenario !== 'portal' && scenario !== 'defeat') return;
+    if (scenario !== 'boss' && scenario !== 'victory' && scenario !== 'crown' && scenario !== 'crown-available' && scenario !== 'launch' && scenario !== 'portal' && scenario !== 'defeat') return;
     if (scenario === 'launch') {
       const source = this.planets[0];
       const destination = this.planets[1];
@@ -1267,6 +1317,24 @@ export class Game {
     this.hero.group.quaternion.copy(surfaceOrientation(this.playerNormal, this.playerHeading));
     this.cameraDistance = 13;
     this.audio.setBossTheme(true);
+    if (scenario === 'crown-available') {
+      for (const coin of finalPlanet.coins.slice(0, finalPlanet.relicRingTarget)) {
+        if (coin.collected) continue;
+        coin.collected = true;
+        coin.mesh.visible = false;
+        this.coins += 1;
+      }
+      const ringRelic = finalPlanet.relics.find((relic) => relic.source === 'rings' && !relic.collected);
+      if (ringRelic) {
+        // Keep the preview route deterministic after the camera returns; the
+        // live Warden is restored for the real game, but QA should not turn a
+        // framing check into a random defeat while the screenshot is taken.
+        if (finalPlanet.boss) finalPlanet.boss.attackCooldown = 99;
+        this.crownAvailabilityShown.add(finalPlanet);
+        this.beginBossVictory(false, 'rings', ringRelic, false);
+      }
+      return;
+    }
     if (scenario === 'crown') {
       for (const coin of finalPlanet.coins.slice(0, finalPlanet.relicRingTarget)) {
         if (coin.collected) continue;
@@ -1480,7 +1548,7 @@ export class Game {
         // The toon-shooter GLB contains every gun/knife variant in one file.
         // Hide all authored props; HeroVisual adds the game's one procedural
         // mallet at the hand so a loader update cannot expose a second weapon.
-        const isAuthoredWeapon = /^(Revolver|Sniper|Pistol|SMG|GrenadeLauncher|ShortCannon|Shotgun|RocketLauncher|AK|Shovel|Knife)/.test(node.name);
+        const isAuthoredWeapon = /^(Revolver|Sniper|Pistol|SMG|GrenadeLauncher|ShortCannon|Shotgun|RocketLauncher|AK|Shovel|Knife|1H_Crossbow|2H_Crossbow|Knife_Offhand|Throwable)/.test(node.name);
         if (isAuthoredWeapon) {
           node.visible = false;
         }
