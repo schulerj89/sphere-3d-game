@@ -493,15 +493,36 @@ export class Game {
     const future = quadraticBezier(cinematic.start, middle, cinematic.end, Math.min(1, t + 0.02));
     const velocity = future.sub(position).normalize();
     this.hero.group.position.copy(position);
-    const cinematicNormal = velocity.clone().cross(WORLD_UP).cross(velocity).normalize();
-    if (cinematicNormal.lengthSq() < 0.001) cinematicNormal.copy(WORLD_UP);
-    this.hero.group.quaternion.copy(surfaceOrientation(cinematicNormal, velocity));
+    // Keep Nova upright while she is in the interplanetary shot. The old
+    // orientation projected WORLD_UP across the travel vector; on the steep
+    // launch arc that produced a sideways/upsidedown basis. Blend from the
+    // source sphere's tangent, through a world-up hero pose, into the
+    // destination sphere's tangent only as she reaches the landing beat.
+    const launchOrientation = surfaceOrientation(
+      this.playerNormal,
+      forwardOnNormal(velocity, this.playerNormal, this.playerHeading),
+    );
+    const uprightOrientation = surfaceOrientation(
+      WORLD_UP,
+      forwardOnNormal(velocity, WORLD_UP, this.playerHeading),
+    );
+    const landingOrientation = surfaceOrientation(
+      cinematic.destination.definition.startNormal,
+      forwardOnNormal(velocity, cinematic.destination.definition.startNormal, this.playerHeading),
+    );
+    const orientation = launchOrientation.clone().slerp(uprightOrientation, smoothstep(Math.min(1, raw / 0.18)));
+    orientation.slerp(landingOrientation, smoothstep(Math.max(0, (raw - 0.78) / 0.22)));
+    this.hero.group.quaternion.copy(orientation);
     this.hero.setRunCycle(8, this.elapsed, true);
+    // Camera placement follows the rendered hero's actual +Z face, not just
+    // the arc tangent. The two can diverge during the vertical middle beat;
+    // basing the close-up on this vector guarantees Nova remains readable.
+    const heroForward = new THREE.Vector3(0, 0, 1).applyQuaternion(orientation).normalize();
 
     // Three deliberate camera beats keep the transfer readable: an intimate
     // launch close-up, a wide reveal of the interplanetary route, then a
     // compressed approach that makes the destination feel earned.
-    const side = new THREE.Vector3().crossVectors(WORLD_UP, velocity).normalize();
+    const side = new THREE.Vector3().crossVectors(WORLD_UP, heroForward).normalize();
     if (side.lengthSq() < 0.001) side.set(1, 0, 0);
     const orbit = this.elapsed * 0.72;
     const orbitSide = side.clone().multiplyScalar(Math.sin(orbit));
@@ -510,15 +531,15 @@ export class Game {
     if (raw < 0.22) {
       const beat = smoothstep(raw / 0.22);
       cameraOffset
-        .addScaledVector(velocity, THREE.MathUtils.lerp(-4.4, -8.5, beat))
-        .addScaledVector(WORLD_UP, THREE.MathUtils.lerp(1.4, 4.5, beat))
-        .addScaledVector(orbitSide, THREE.MathUtils.lerp(1.8, 4.5, beat));
-      cameraTarget.addScaledVector(velocity, 1.9).addScaledVector(WORLD_UP, 1.15);
+        .addScaledVector(heroForward, THREE.MathUtils.lerp(10.5, 13.5, beat))
+        .addScaledVector(WORLD_UP, THREE.MathUtils.lerp(2.2, 4.2, beat))
+        .addScaledVector(orbitSide, THREE.MathUtils.lerp(1.5, 3.5, beat));
+      cameraTarget.addScaledVector(WORLD_UP, 0.72);
       this.setCinematicCopy('ORBITAL SLINGSHOT', 'Charging the next worldâ€¦');
     } else if (raw < 0.62) {
       const beat = smoothstep((raw - 0.22) / 0.4);
       cameraOffset
-        .addScaledVector(velocity, THREE.MathUtils.lerp(-15, -22, beat))
+        .addScaledVector(heroForward, THREE.MathUtils.lerp(15, 22, beat))
         .addScaledVector(WORLD_UP, THREE.MathUtils.lerp(8, 18, beat))
         .addScaledVector(orbitSide, THREE.MathUtils.lerp(8, 15, beat));
       cameraTarget.copy(position).lerp(cinematic.start.clone().lerp(cinematic.end, 0.5), 0.24);
@@ -526,13 +547,15 @@ export class Game {
     } else {
       const beat = smoothstep((raw - 0.62) / 0.38);
       cameraOffset
-        .addScaledVector(velocity, THREE.MathUtils.lerp(-17, 4, beat))
+        .addScaledVector(heroForward, THREE.MathUtils.lerp(17, 4.5, beat))
         .addScaledVector(WORLD_UP, THREE.MathUtils.lerp(13, 3.5, beat))
         .addScaledVector(orbitSide, THREE.MathUtils.lerp(10, 3.2, beat));
-      cameraTarget.addScaledVector(velocity, THREE.MathUtils.lerp(5, 1.2, beat)).addScaledVector(WORLD_UP, 1.2);
+      cameraTarget.addScaledVector(velocity, THREE.MathUtils.lerp(4.2, 0.8, beat)).addScaledVector(WORLD_UP, 1.2);
       this.setCinematicCopy('LANDING VECTOR', `${cinematic.destination.definition.name} ahead.`);
     }
-    this.camera.position.lerp(position.clone().add(cameraOffset), 1 - Math.exp(-4.8 * delta));
+    // Cut quickly into the shot so the first close-up does not inherit the
+    // title camera's distant orbit and clip Nova against the frame edge.
+    this.camera.position.lerp(position.clone().add(cameraOffset), 1 - Math.exp(-11.5 * delta));
     this.camera.up.copy(WORLD_UP);
     this.camera.lookAt(cameraTarget);
 
@@ -712,7 +735,22 @@ export class Game {
   private configureQaScenario(): void {
     if (!import.meta.env.DEV) return;
     const scenario = new URLSearchParams(window.location.search).get('qa');
-    if (scenario !== 'boss' && scenario !== 'victory') return;
+    if (scenario !== 'boss' && scenario !== 'victory' && scenario !== 'launch') return;
+    if (scenario === 'launch') {
+      const source = this.planets[0];
+      const destination = this.planets[1];
+      if (!source || !destination) return;
+      this.activePlanet = source;
+      for (const planet of this.planets) planet.group.visible = planet === source || planet === destination;
+      for (const coin of source.coins) {
+        coin.collected = true;
+        coin.mesh.visible = false;
+      }
+      this.coins = Math.max(this.coins, source.coinTarget);
+      this.placePlayerAt(source, source.definition.launchNormal);
+      this.beginLaunch();
+      return;
+    }
     const finalPlanet = this.planets[this.planets.length - 1];
     if (!finalPlanet?.definition.bossNormal) return;
     this.activePlanet = finalPlanet;
@@ -1018,4 +1056,22 @@ function quadraticBezier(start: THREE.Vector3, control: THREE.Vector3, end: THRE
 function smoothstep(value: number): number {
   const t = THREE.MathUtils.clamp(value, 0, 1);
   return t * t * (3 - 2 * t);
+}
+
+/**
+ * Return a stable tangent for a cinematic orientation. A launch can be
+ * momentarily vertical, which leaves a zero-length projection; keeping the
+ * previous heading in that case prevents quaternion NaNs and upside-down
+ * model flips.
+ */
+function forwardOnNormal(
+  direction: THREE.Vector3,
+  normal: THREE.Vector3,
+  fallback: THREE.Vector3,
+): THREE.Vector3 {
+  const forward = direction.clone().projectOnPlane(normal);
+  if (forward.lengthSq() < 0.0001) forward.copy(fallback).projectOnPlane(normal);
+  if (forward.lengthSq() < 0.0001) forward.set(0, 0, 1).projectOnPlane(normal);
+  if (forward.lengthSq() < 0.0001) forward.set(1, 0, 0).projectOnPlane(normal);
+  return forward.normalize();
 }
