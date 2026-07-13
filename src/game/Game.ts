@@ -11,7 +11,7 @@ import {
 } from './World';
 import { MobileInput } from '../input/MobileInput';
 
-type GamePhase = 'title' | 'playing' | 'cinematic' | 'defeat' | 'bossVictory' | 'complete';
+type GamePhase = 'title' | 'playing' | 'cinematic' | 'portalActivation' | 'defeat' | 'bossVictory' | 'complete';
 
 interface LaunchCinematic {
   readonly source: Planet;
@@ -32,11 +32,25 @@ interface DefeatCinematic {
 }
 
 interface BossVictoryCinematic {
+  readonly planet: Planet;
   readonly origin: THREE.Vector3;
   readonly normal: THREE.Vector3;
   readonly heading: THREE.Vector3;
   readonly source: 'rings' | 'boss';
+  readonly relic?: Planet['relics'][number];
   readonly finale: boolean;
+  readonly focusDuration: number;
+  readonly animationDuration: number;
+  animationStarted: boolean;
+  elapsed: number;
+}
+
+interface PortalActivationCinematic {
+  readonly planet: Planet;
+  readonly playerPosition: THREE.Vector3;
+  readonly playerNormal: THREE.Vector3;
+  readonly playerHeading: THREE.Vector3;
+  readonly portalNormal: THREE.Vector3;
   elapsed: number;
 }
 
@@ -123,8 +137,11 @@ export class Game {
   private activePlanet!: Planet;
   private phase: GamePhase = 'title';
   private cinematic: LaunchCinematic | undefined;
+  private portalActivationCinematic: PortalActivationCinematic | undefined;
   private defeatCinematic: DefeatCinematic | undefined;
   private bossVictoryCinematic: BossVictoryCinematic | undefined;
+  private readonly portalActivationShown = new WeakSet<Planet>();
+  private portalActivationFx: THREE.Group | undefined;
   private elapsed = 0;
   private lastFrameTimestamp = performance.now();
   private playerHeight = 0;
@@ -295,6 +312,8 @@ export class Game {
       this.updatePlaying(delta);
     } else if (this.phase === 'cinematic') {
       this.updateCinematic(delta);
+    } else if (this.phase === 'portalActivation') {
+      this.updatePortalActivation(delta);
     } else if (this.phase === 'defeat') {
       this.updateDefeat(delta);
     } else if (this.phase === 'bossVictory') {
@@ -409,6 +428,7 @@ export class Game {
   }
 
   private collectAndResolveEncounters(): void {
+    const launchWasReady = this.activePlanet.isLaunchReady;
     const collected = this.activePlanet.collectNear(this.playerNormal, 1.24);
     if (collected) {
       this.coins += 1;
@@ -424,6 +444,17 @@ export class Game {
       }
     }
 
+    // The final ring should feel like a payoff rather than a silent HUD
+    // change. Freeze the run for a short, deterministic portal reveal before
+    // handing control back to Nova. The WeakSet gate keeps a ready portal
+    // from replaying if the player circles back over its launch halo.
+    if (collected && !launchWasReady && this.activePlanet.isLaunchReady
+      && !this.portalActivationShown.has(this.activePlanet)) {
+      this.portalActivationShown.add(this.activePlanet);
+      this.beginPortalActivation();
+      return;
+    }
+
     const relic = this.activePlanet.collectRelicNear(this.playerNormal);
     if (relic) {
       this.audio.play('complete');
@@ -431,7 +462,7 @@ export class Game {
       // play celebration; the second relic gets the full ending sequence.
       // Keeping this gate here also prevents a fast pickup from skipping the
       // cinematic when the player is already overlapping the other relic.
-      this.beginBossVictory(this.activePlanet.allRelicsCollected, relic.source);
+      this.beginBossVictory(this.activePlanet.allRelicsCollected, relic.source, relic);
       return;
     }
 
@@ -579,6 +610,158 @@ export class Game {
     this.audio.play('launch');
     this.audio.setCinematic(true);
     this.setStatus(`Slingshotting to ${destination.definition.name}…`);
+  }
+
+  /**
+   * Freeze on the newly charged launch halo before the player can leave it.
+   * This is intentionally separate from beginLaunch(): the transfer shot is
+   * only entered after the player presses JUMP, while this beat celebrates the
+   * exact moment the final ring powers the portal.
+   */
+  private beginPortalActivation(): void {
+    if (this.phase !== 'playing') return;
+    const planet = this.activePlanet;
+    const playerNormal = this.playerNormal.clone().normalize();
+    const playerHeading = this.playerHeading.clone().projectOnPlane(playerNormal);
+    if (playerHeading.lengthSq() < 0.001) playerHeading.copy(WORLD_UP).projectOnPlane(playerNormal);
+    playerHeading.normalize();
+    const portalNormal = planet.definition.launchNormal.clone().normalize();
+    this.ensurePortalActivationFx(planet);
+    this.phase = 'portalActivation';
+    this.portalActivationCinematic = {
+      planet,
+      playerPosition: this.playerPosition.clone(),
+      playerNormal,
+      playerHeading,
+      portalNormal,
+      elapsed: 0,
+    };
+    this.hud.classList.add('is-hidden');
+    this.cinematicOverlay.classList.add('is-active', 'is-portal-activation');
+    this.cinematicOverlay.classList.remove('is-defeat', 'is-boss-victory');
+    this.input?.setVisible(false);
+    this.setCinematicCopy('PORTAL ONLINE', 'The launch halo is fully charged.');
+    this.audio.play('launch');
+    this.audio.setCinematic(true);
+    this.setStatus('Launch halo activated.');
+  }
+
+  private updatePortalActivation(delta: number): void {
+    const cinematic = this.portalActivationCinematic;
+    if (!cinematic) return;
+    cinematic.elapsed += delta;
+    const focusDuration = 2.15;
+    const duration = 4.2;
+    const raw = THREE.MathUtils.clamp(cinematic.elapsed / duration, 0, 1);
+    const focusRaw = THREE.MathUtils.clamp(cinematic.elapsed / focusDuration, 0, 1);
+
+    // Nova is frozen at the exact surface point where the last ring was
+    // collected. The portal focus never mutates playerNormal, so the return
+    // shot can hand control back without a visible snap or D-pad drift.
+    this.hero.group.position.copy(cinematic.playerPosition);
+    this.hero.group.quaternion.copy(surfaceOrientation(cinematic.playerNormal, cinematic.playerHeading));
+    this.hero.setRunCycle(0, this.elapsed, false);
+    this.setCharacterAnimation('idle');
+
+    const fx = this.portalActivationFx;
+    if (fx) {
+      fx.visible = true;
+      const pulse = 1 + Math.sin(this.elapsed * 8.5) * 0.11;
+      fx.scale.setScalar(THREE.MathUtils.lerp(0.72, 1.15, smoothstep(focusRaw)) * pulse);
+      fx.rotation.y += delta * 0.9;
+      const progress = THREE.MathUtils.clamp(cinematic.elapsed / focusDuration, 0, 1);
+      fx.traverse((node) => {
+        if (!(node instanceof THREE.Mesh || node instanceof THREE.PointLight)) return;
+        const material = node instanceof THREE.Mesh && Array.isArray(node.material)
+          ? node.material[0]
+          : node instanceof THREE.Mesh ? node.material : undefined;
+        if (material && 'opacity' in material) {
+          material.opacity = THREE.MathUtils.clamp(0.25 + progress * 0.7, 0, 0.96);
+        }
+        if (node instanceof THREE.PointLight) node.intensity = 5 + progress * 18;
+      });
+    }
+
+    const portalPosition = cinematic.planet.worldPosition(cinematic.portalNormal, 0.32);
+    const side = new THREE.Vector3().crossVectors(cinematic.portalNormal, cinematic.playerHeading).normalize();
+    if (side.lengthSq() < 0.001) side.set(1, 0, 0);
+    const tangent = cinematic.playerHeading.clone().projectOnPlane(cinematic.portalNormal).normalize();
+    if (tangent.lengthSq() < 0.001) tangent.copy(side);
+
+    const cameraPosition = new THREE.Vector3();
+    const cameraTarget = new THREE.Vector3();
+    if (raw < 0.56) {
+      const beat = smoothstep(raw / 0.56);
+      const orbit = cinematic.elapsed * 1.2;
+      cameraPosition.copy(portalPosition)
+        .addScaledVector(cinematic.portalNormal, THREE.MathUtils.lerp(7.4, 5.4, beat))
+        .addScaledVector(side, Math.sin(orbit) * THREE.MathUtils.lerp(2.1, 3.5, beat))
+        .addScaledVector(tangent, Math.cos(orbit) * 1.4);
+      cameraTarget.copy(portalPosition).addScaledVector(cinematic.portalNormal, 0.35);
+      this.camera.up.copy(cinematic.portalNormal);
+      this.setCinematicCopy('PORTAL ONLINE', 'The launch halo answers the starlight.');
+    } else {
+      const beat = smoothstep((raw - 0.56) / 0.44);
+      const sideOffset = new THREE.Vector3().crossVectors(cinematic.playerNormal, cinematic.playerHeading).normalize();
+      if (sideOffset.lengthSq() < 0.001) sideOffset.set(1, 0, 0);
+      cameraPosition.copy(cinematic.playerPosition)
+        .addScaledVector(cinematic.playerNormal, THREE.MathUtils.lerp(8.2, DEFAULT_CAMERA_DISTANCE, beat))
+        .addScaledVector(cinematic.playerHeading, THREE.MathUtils.lerp(3.6, 5.4, beat))
+        .addScaledVector(sideOffset, Math.sin(cinematic.elapsed * 0.8) * 1.2);
+      cameraTarget.copy(cinematic.playerPosition).addScaledVector(cinematic.playerNormal, 1.12);
+      this.camera.up.copy(cinematic.playerNormal);
+      this.setCinematicCopy('ROUTE READY', 'Nova can jump whenever you are ready.');
+    }
+    this.camera.position.lerp(cameraPosition, 1 - Math.exp(-10 * delta));
+    this.camera.lookAt(cameraTarget);
+
+    if (raw < 1) return;
+    if (fx) fx.visible = false;
+    this.portalActivationCinematic = undefined;
+    this.phase = 'playing';
+    this.cinematicOverlay.classList.remove('is-active', 'is-portal-activation');
+    this.hud.classList.remove('is-hidden');
+    this.input?.setVisible(true);
+    this.cameraDistance = DEFAULT_CAMERA_DISTANCE;
+    this.audio.setCinematic(false);
+    this.setStatus('Launch halo charged! Stand inside it and press JUMP.');
+    this.updateUi();
+  }
+
+  private ensurePortalActivationFx(planet: Planet): void {
+    if (this.portalActivationFx?.parent === planet.launchPad) {
+      this.portalActivationFx.visible = true;
+      return;
+    }
+    this.portalActivationFx?.parent?.remove(this.portalActivationFx);
+    const fx = new THREE.Group();
+    fx.name = 'launch-activation-fx';
+    const color = planet.definition.atmosphere;
+    const ringMaterial = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.78,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    for (const [radius, y] of [[1.36, 0.12], [1.82, 0.24], [2.3, 0.38]] as const) {
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(radius, 0.045, 8, 48), ringMaterial.clone());
+      ring.rotation.x = Math.PI / 2;
+      ring.position.y = y;
+      fx.add(ring);
+    }
+    const beam = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.09, 0.54, 3.8, 12, 1, true),
+      new THREE.MeshBasicMaterial({ color: 0xd8fbff, transparent: true, opacity: 0.3, depthWrite: false, blending: THREE.AdditiveBlending }),
+    );
+    beam.position.y = 1.9;
+    fx.add(beam);
+    const light = new THREE.PointLight(color, 15, 14, 2);
+    light.position.y = 1.4;
+    fx.add(light);
+    fx.visible = false;
+    planet.launchPad.add(fx);
+    this.portalActivationFx = fx;
   }
 
   private updateCinematic(delta: number): void {
@@ -830,7 +1013,11 @@ export class Game {
     window.location.replace(url.toString());
   };
 
-  private beginBossVictory(finale = this.activePlanet.allRelicsCollected, source: 'rings' | 'boss' = 'boss'): void {
+  private beginBossVictory(
+    finale = this.activePlanet.allRelicsCollected,
+    source: 'rings' | 'boss' = 'boss',
+    relic?: Planet['relics'][number],
+  ): void {
     const normal = this.playerNormal.clone().normalize();
     const heading = this.playerHeading.clone().projectOnPlane(normal);
     if (heading.lengthSq() < 0.001) heading.copy(WORLD_UP).projectOnPlane(normal);
@@ -846,7 +1033,10 @@ export class Game {
       if (bossArena) bossArena.visible = false;
     }
     this.phase = 'bossVictory';
+    const focusDuration = relic ? 2.05 : 0;
+    const animationDuration = finale ? 5.8 : 3.6;
     this.bossVictoryCinematic = {
+      planet: this.activePlanet,
       // Snap the reward beat to the planet surface even when the relic was
       // collected during a jump. The hero's model origin is at its feet, so
       // this keeps the celebration visibly planted instead of hovering.
@@ -854,9 +1044,20 @@ export class Game {
       normal,
       heading,
       source,
+      relic,
       finale,
+      focusDuration,
+      animationDuration,
+      animationStarted: !relic,
       elapsed: 0,
     };
+    if (relic) {
+      // collectRelicNear hides the mesh immediately so it cannot be collected
+      // twice. Keep it visible for this read-only close-up, then hide it when
+      // the camera returns to Nova.
+      relic.mesh.visible = true;
+      relic.mesh.scale.setScalar(1);
+    }
     this.hud.classList.add('is-hidden');
     this.cinematicOverlay.classList.add('is-active', 'is-boss-victory');
     this.input?.setVisible(false);
@@ -867,16 +1068,20 @@ export class Game {
     );
     this.audio.setBossTheme(false);
     this.audio.setCinematic(true);
-    this.triggerAnimation('celebrate', finale ? 5.8 : 3.6);
+    if (!relic) this.triggerAnimation('celebrate', animationDuration);
   }
 
   private updateBossVictory(delta: number): void {
     const cinematic = this.bossVictoryCinematic;
     if (!cinematic) return;
     cinematic.elapsed += delta;
-    const duration = cinematic.finale ? 5.8 : 3.6;
+    const duration = cinematic.focusDuration + cinematic.animationDuration;
     const raw = THREE.MathUtils.clamp(cinematic.elapsed / duration, 0, 1);
-    const beat = smoothstep(raw);
+    const inFocus = Boolean(cinematic.relic && cinematic.elapsed < cinematic.focusDuration);
+    const playerRaw = cinematic.focusDuration > 0
+      ? THREE.MathUtils.clamp((cinematic.elapsed - cinematic.focusDuration) / cinematic.animationDuration, 0, 1)
+      : raw;
+    const beat = smoothstep(playerRaw);
     const normal = cinematic.normal;
     const heading = cinematic.heading;
     // Keep Nova's feet on the sphere for the whole reward beat. The authored
@@ -889,6 +1094,39 @@ export class Game {
     const cinematicForward = forwardOnNormal(heading, normal, new THREE.Vector3(0, 0, 1));
     this.hero.group.quaternion.copy(surfaceOrientation(normal, cinematicForward));
     this.hero.setRunCycle(0, this.elapsed, false);
+
+    if (cinematic.relic) {
+      // Planet.update() correctly hides collected relics during gameplay. The
+      // reward shot is the one intentional exception: show the collected
+      // crown while the camera is locked to it, then hide it before returning
+      // to the player so the world state still says "claimed".
+      cinematic.relic.mesh.visible = inFocus;
+      if (inFocus) {
+        const crownNormal = cinematic.relic.normal.clone().normalize();
+        const crownPosition = cinematic.planet.worldPosition(crownNormal, 1.28);
+        const crownForward = forwardOnNormal(heading, crownNormal, new THREE.Vector3(0, 0, 1));
+        const crownSide = new THREE.Vector3().crossVectors(crownNormal, crownForward).normalize();
+        if (crownSide.lengthSq() < 0.001) crownSide.set(1, 0, 0);
+        const crownBeat = smoothstep(cinematic.elapsed / cinematic.focusDuration);
+        const crownOrbit = cinematic.elapsed * 1.35;
+        const crownCamera = crownPosition.clone()
+          .addScaledVector(crownNormal, THREE.MathUtils.lerp(5.7, 4.35, crownBeat))
+          .addScaledVector(crownSide, Math.sin(crownOrbit) * THREE.MathUtils.lerp(1.8, 2.5, crownBeat))
+          .addScaledVector(crownForward, Math.cos(crownOrbit) * 1.1);
+        this.camera.position.lerp(crownCamera, 1 - Math.exp(-10 * delta));
+        this.camera.up.copy(crownNormal);
+        this.camera.lookAt(crownPosition.clone().addScaledVector(crownNormal, 0.18));
+        this.setCinematicCopy('CROWN AWAKENED', cinematic.source === 'rings'
+          ? 'The ring relic answers Nova.'
+          : 'The Warden relic answers Nova.');
+      }
+      if (!cinematic.animationStarted && cinematic.elapsed >= cinematic.focusDuration) {
+        cinematic.animationStarted = true;
+        this.triggerAnimation('celebrate', cinematic.animationDuration);
+      }
+    }
+
+    if (inFocus) return;
 
     const orbit = this.elapsed * 0.9;
     const cameraSide = new THREE.Vector3().crossVectors(normal, cinematicForward).normalize();
@@ -909,21 +1147,22 @@ export class Game {
     this.camera.up.copy(normal);
     this.camera.lookAt(cameraTarget);
 
-    if (!cinematic.finale && raw < 0.34) {
+    if (!cinematic.finale && playerRaw < 0.34) {
       this.setCinematicCopy('CROWN AWAKENED', cinematic.source === 'rings'
         ? 'The ring relic answers Nova.'
         : 'The Warden relic answers Nova.');
-    } else if (!cinematic.finale && raw < 0.78) {
+    } else if (!cinematic.finale && playerRaw < 0.78) {
       this.setCinematicCopy('AURORA CROWN', 'One relic secured. The next light is still out there.');
-    } else if (raw < 0.34) {
+    } else if (playerRaw < 0.34) {
       this.setCinematicCopy('AURORA CROWN', 'The Warden yields to Nova.');
-    } else if (raw < 0.78) {
+    } else if (playerRaw < 0.78) {
       this.setCinematicCopy('CROWN OF LIGHT', 'Dance beneath the final light.');
     } else {
       this.setCinematicCopy('STARBOUND CHAMPION', 'The galaxy remembers this run.');
     }
 
     if (raw < 1) return;
+    if (cinematic.relic) cinematic.relic.mesh.visible = false;
     this.bossVictoryCinematic = undefined;
     this.hero.group.scale.setScalar(1);
     this.cinematicOverlay.classList.remove('is-active', 'is-boss-victory');
@@ -954,7 +1193,7 @@ export class Game {
   private configureQaScenario(): void {
     if (!import.meta.env.DEV) return;
     const scenario = new URLSearchParams(window.location.search).get('qa');
-    if (scenario !== 'boss' && scenario !== 'victory' && scenario !== 'crown' && scenario !== 'launch' && scenario !== 'defeat') return;
+    if (scenario !== 'boss' && scenario !== 'victory' && scenario !== 'crown' && scenario !== 'launch' && scenario !== 'portal' && scenario !== 'defeat') return;
     if (scenario === 'launch') {
       const source = this.planets[0];
       const destination = this.planets[1];
@@ -968,6 +1207,21 @@ export class Game {
       this.coins = Math.max(this.coins, source.coinTarget);
       this.placePlayerAt(source, source.definition.launchNormal);
       this.beginLaunch();
+      return;
+    }
+    if (scenario === 'portal') {
+      const source = this.planets[0];
+      if (!source) return;
+      this.activePlanet = source;
+      for (const planet of this.planets) planet.group.visible = planet === source;
+      for (const coin of source.coins) {
+        coin.collected = true;
+        coin.mesh.visible = false;
+      }
+      this.coins = Math.max(this.coins, source.coinTarget);
+      this.placePlayerAt(source, source.definition.startNormal);
+      this.portalActivationShown.add(source);
+      this.beginPortalActivation();
       return;
     }
     if (scenario === 'defeat') {
@@ -1014,7 +1268,7 @@ export class Game {
         this.playerHeading.copy(arenaNormal).projectOnPlane(this.playerNormal).normalize();
         this.cameraHeading.copy(this.playerHeading);
         finalPlanet.collectRelicNear(ringRelic.normal, 0.5);
-        this.beginBossVictory(false, 'rings');
+        this.beginBossVictory(false, 'rings', ringRelic);
       }
       return;
     }
@@ -1027,10 +1281,11 @@ export class Game {
       this.coins += 1;
     }
     finalPlanet.damageBoss(finalPlanet.boss.health);
-    while (!finalPlanet.allRelicsCollected && finalPlanet.collectRelicNear(arenaNormal, 4)) {
+    let finalRelic: Planet['relics'][number] | undefined;
+    while (!finalPlanet.allRelicsCollected && (finalRelic = finalPlanet.collectRelicNear(arenaNormal, 4))) {
       // Collect both QA relics at the shared arena so the full payoff can be inspected.
     }
-    if (finalPlanet.allRelicsCollected) this.beginBossVictory();
+    if (finalPlanet.allRelicsCollected) this.beginBossVictory(true, finalRelic?.source ?? 'boss', finalRelic);
   }
 
   private updateTitleCamera(delta: number): void {

@@ -700,6 +700,15 @@ button {
   animation: crown-title-pulse 1.6s ease-in-out infinite;
 }
 .cinematic-overlay.is-boss-victory span { color: #d9f7ff; }
+.cinematic-overlay.is-portal-activation {
+  background: radial-gradient(ellipse at 50% 54%, rgba(91, 231, 255, 0.22), transparent 54%);
+}
+.cinematic-overlay.is-portal-activation p {
+  color: #bdf8ff;
+  text-shadow: 0 2px 10px #001a2a, 0 0 34px rgba(70, 221, 255, 0.9);
+  animation: portal-title-pulse 1.25s ease-in-out infinite;
+}
+.cinematic-overlay.is-portal-activation span { color: #e0fbff; }
 
 .complete-screen {
   z-index: 50;
@@ -734,6 +743,11 @@ button {
 @keyframes crown-title-pulse {
   0%, 100% { opacity: 0.8; letter-spacing: 0.08em; }
   50% { opacity: 1; letter-spacing: 0.13em; }
+}
+
+@keyframes portal-title-pulse {
+  0%, 100% { opacity: 0.78; letter-spacing: 0.08em; }
+  50% { opacity: 1; letter-spacing: 0.14em; }
 }
 
 @media (max-width: 600px) {
