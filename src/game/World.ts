@@ -1071,12 +1071,15 @@ export function createHeroVisual(): HeroVisual {
   // The source rogue ships every hand-slot prop in the same scene. Keep a
   // readable two-piece loadout (crossbow + offhand knife), and animate those
   // props independently so equip/attack beats remain visible even when the
-  // authored arm clips are cross-faded.
+  // authored arm clips are cross-faded. The knife is a vertical cylinder, so
+  // it needs a roll around its local Z axis to read as a slash (a small Y
+  // recoil, which works for the crossbow, is almost invisible on the blade).
   let weaponPoses: WeaponPose[] = [];
   let weaponAnimation: { kind: HeroWeaponAnimation; start: number; duration: number } | undefined;
   const weaponEquipOffset = new THREE.Vector3(0, 0.14, -0.05);
   const weaponRecoil = new THREE.Quaternion();
   const weaponRecoilAxis = new THREE.Vector3(0, 1, 0);
+  const knifeSwingAxis = new THREE.Vector3(0, 0, 1);
 
   const updateWeaponAnimation = (elapsed: number): void => {
     if (!weaponAnimation) return;
@@ -1089,15 +1092,16 @@ export function createHeroVisual(): HeroVisual {
         pose.object.scale.lerpVectors(pose.equipScale, pose.scale, eased);
       }
     } else {
-      // The 1H attack clip drives the arms. This secondary hand-local recoil
-      // gives both retained weapons a readable impact without changing the
-      // source GLB or introducing another weapon mesh.
+      // The dual-wield attack clip drives both arms. This secondary hand-local
+      // recoil gives both retained weapons a readable impact without changing
+      // the source GLB or introducing another weapon mesh.
       const pulse = Math.sin(progress * Math.PI);
       for (const pose of weaponPoses) {
+        const isKnife = pose.object.name === 'Knife_Offhand';
         pose.object.position.copy(pose.position);
-        pose.object.position.z -= pulse * 0.075;
-        pose.object.position.x += (pose.object.name === 'Knife_Offhand' ? -1 : 1) * pulse * 0.035;
-        weaponRecoil.setFromAxisAngle(weaponRecoilAxis, pulse * 0.24);
+        pose.object.position.z -= pulse * (isKnife ? 0.13 : 0.075);
+        pose.object.position.x += (isKnife ? -1 : 1) * pulse * (isKnife ? 0.07 : 0.035);
+        weaponRecoil.setFromAxisAngle(isKnife ? knifeSwingAxis : weaponRecoilAxis, pulse * (isKnife ? 0.72 : 0.24));
         pose.object.quaternion.copy(pose.quaternion).multiply(weaponRecoil);
         pose.object.scale.copy(pose.scale);
       }
