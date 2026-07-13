@@ -135,6 +135,30 @@ body {
 .asset-swatch-external { background: #6ee7ff; box-shadow: 0 0 10px #6ee7ff; }
 .asset-swatch-fallback { background: #ffcb66; box-shadow: 0 0 10px #ffcb66; }
 
+.presentation-harness-panel {
+  width: min(920px, calc(100vw - 32px));
+}
+
+.presentation-label {
+  position: absolute;
+  z-index: 2;
+  bottom: 12%;
+  width: 23%;
+  color: #e6f7ff;
+  font-size: clamp(0.5rem, 1.25vw, 0.72rem);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1.25;
+  text-align: center;
+  text-shadow: 0 2px 8px #001020;
+  transform: translateX(-50%);
+}
+
+.presentation-label-portal { left: 13.8%; color: #9eeeff; }
+.presentation-label-celebrate { left: 36.2%; color: #b8ffd8; }
+.presentation-label-defeat { left: 63.8%; color: #ffbfd2; }
+.presentation-label-relic { left: 86.2%; color: #ffe7a0; }
+
 button {
   font: inherit;
 }

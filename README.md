@@ -21,7 +21,12 @@ For render and asset counters, append `?debug=1` to the local or hosted URL.
 The portal can be reviewed outside the game camera at `?harness=assets` (for
 example, `http://localhost:5173/?harness=assets`). The harness places the
 Kenney gate beside the procedural fallback and reports the imported mesh
-triangle count before it is enabled on the spheres.
+triangle count before it is enabled on the spheres. The presentation QA room
+is available at `?harness=presentation`; it keeps portal static/charged,
+celebration ground contact, one-shot defeat freeze, and crown silhouette in a
+single deterministic camera view. It discovers character/crown GLBs from
+`public/assets/asset-manifest.json` and reports when a procedural fallback is
+being reviewed.
 
 ## Local development
 
