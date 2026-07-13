@@ -31,6 +31,9 @@ interface DefeatCinematic {
 interface BossVictoryCinematic {
   readonly origin: THREE.Vector3;
   readonly normal: THREE.Vector3;
+  readonly heading: THREE.Vector3;
+  readonly source: 'rings' | 'boss';
+  readonly finale: boolean;
   elapsed: number;
 }
 
@@ -397,14 +400,11 @@ export class Game {
     const relic = this.activePlanet.collectRelicNear(this.playerNormal);
     if (relic) {
       this.audio.play('complete');
-      const collectedRelics = this.activePlanet.relicsCollected;
-      const totalRelics = this.activePlanet.relics.length;
-      if (this.activePlanet.allRelicsCollected) {
-        this.beginBossVictory();
-      } else {
-        const sourceLabel = relic.source === 'boss' ? 'Warden' : 'ring';
-        this.setStatus(`${sourceLabel} Aurora Crown relic claimed (${collectedRelics}/${totalRelics}). Find the other relic.`);
-      }
+      // Every crown is a payoff beat. The first relic gets a short return-to-
+      // play celebration; the second relic gets the full ending sequence.
+      // Keeping this gate here also prevents a fast pickup from skipping the
+      // cinematic when the player is already overlapping the other relic.
+      this.beginBossVictory(this.activePlanet.allRelicsCollected, relic.source);
       return;
     }
 
@@ -531,7 +531,12 @@ export class Game {
     const duration = 4.35;
     const raw = THREE.MathUtils.clamp(cinematic.elapsed / duration, 0, 1);
     const t = raw * raw * (3 - 2 * raw);
-    const middle = cinematic.start.clone().lerp(cinematic.end, 0.5).add(new THREE.Vector3(0, 34, 0));
+    // Lift the arc away from the launch sphere before crossing the midpoint.
+    // World-up alone points inward on a side-facing start normal, which made
+    // Nova pass through the planet and disappear behind its depth buffer.
+    const middle = cinematic.start.clone().lerp(cinematic.end, 0.5)
+      .addScaledVector(this.playerNormal, 18)
+      .addScaledVector(WORLD_UP, 34);
     const position = quadraticBezier(cinematic.start, middle, cinematic.end, t);
     const future = quadraticBezier(cinematic.start, middle, cinematic.end, Math.min(1, t + 0.02));
     const velocity = future.sub(position).normalize();
@@ -573,11 +578,20 @@ export class Game {
     const cameraTarget = position.clone();
     if (raw < 0.22) {
       const beat = smoothstep(raw / 0.22);
+      const openingRadial = this.playerNormal.clone().add(WORLD_UP);
+      if (openingRadial.lengthSq() < 0.001) openingRadial.copy(this.playerNormal);
+      openingRadial.normalize();
+      const openingForward = this.playerHeading.clone().projectOnPlane(openingRadial);
+      if (openingForward.lengthSq() < 0.001) openingForward.copy(heroForward).projectOnPlane(openingRadial);
+      openingForward.normalize();
       cameraOffset
-        .addScaledVector(heroForward, THREE.MathUtils.lerp(10.5, 13.5, beat))
-        .addScaledVector(WORLD_UP, THREE.MathUtils.lerp(2.2, 4.2, beat))
-        .addScaledVector(orbitSide, THREE.MathUtils.lerp(1.5, 3.5, beat));
-      cameraTarget.addScaledVector(WORLD_UP, 0.72);
+        // The launch starts on the source sphere's side. Keep the opening
+        // camera on a radial, outside-the-planet line before easing into the
+        // hero's forward vector; a tangent-heavy offset clips through Luma
+        // and loses Nova in the first half-second.
+        .addScaledVector(openingRadial, THREE.MathUtils.lerp(12, 14, beat))
+        .addScaledVector(openingForward, THREE.MathUtils.lerp(4, 5.5, beat));
+      cameraTarget.addScaledVector(openingRadial, 0.8).addScaledVector(WORLD_UP, 0.72);
       this.setCinematicCopy('ORBITAL SLINGSHOT', 'Charging the next worldâ€¦');
     } else if (raw < 0.62) {
       const beat = smoothstep((raw - 0.22) / 0.4);
@@ -591,6 +605,7 @@ export class Game {
       const beat = smoothstep((raw - 0.62) / 0.38);
       cameraOffset
         .addScaledVector(heroForward, THREE.MathUtils.lerp(17, 4.5, beat))
+        .addScaledVector(cinematic.destination.definition.startNormal, THREE.MathUtils.lerp(10, 4.5, beat))
         .addScaledVector(WORLD_UP, THREE.MathUtils.lerp(13, 3.5, beat))
         .addScaledVector(orbitSide, THREE.MathUtils.lerp(10, 3.2, beat));
       cameraTarget.addScaledVector(velocity, THREE.MathUtils.lerp(4.2, 0.8, beat)).addScaledVector(WORLD_UP, 1.2);
@@ -709,49 +724,72 @@ export class Game {
     this.updateUi();
   }
 
-  private beginBossVictory(): void {
+  private beginBossVictory(finale = this.activePlanet.allRelicsCollected, source: 'rings' | 'boss' = 'boss'): void {
+    const normal = this.playerNormal.clone().normalize();
+    const heading = this.playerHeading.clone().projectOnPlane(normal);
+    if (heading.lengthSq() < 0.001) heading.copy(WORLD_UP).projectOnPlane(normal);
+    heading.normalize();
     this.phase = 'bossVictory';
     this.bossVictoryCinematic = {
       origin: this.playerPosition.clone(),
-      normal: this.playerNormal.clone(),
+      normal,
+      heading,
+      source,
+      finale,
       elapsed: 0,
     };
     this.hud.classList.add('is-hidden');
     this.cinematicOverlay.classList.add('is-active', 'is-boss-victory');
     this.input?.setVisible(false);
     this.cinematicOverlay.classList.remove('is-defeat');
-    this.setCinematicCopy('AURORA CROWN', 'Dance beneath the final light.');
+    this.setCinematicCopy(
+      finale ? 'AURORA CROWN' : 'CROWN AWAKENED',
+      finale ? 'Dance beneath the final light.' : 'Nova claims another piece of the light.',
+    );
     this.audio.setBossTheme(false);
     this.audio.setCinematic(true);
-    this.triggerAnimation('celebrate', 5.8);
+    this.triggerAnimation('celebrate', finale ? 5.8 : 3.6);
   }
 
   private updateBossVictory(delta: number): void {
     const cinematic = this.bossVictoryCinematic;
     if (!cinematic) return;
     cinematic.elapsed += delta;
-    const duration = 5.8;
+    const duration = cinematic.finale ? 5.8 : 3.6;
     const raw = THREE.MathUtils.clamp(cinematic.elapsed / duration, 0, 1);
     const beat = smoothstep(raw);
     const normal = cinematic.normal;
-    const side = new THREE.Vector3().crossVectors(normal, this.playerHeading).normalize();
-    if (side.lengthSq() < 0.001) side.set(1, 0, 0);
+    const heading = cinematic.heading;
     const position = cinematic.origin.clone().addScaledVector(normal, 0.28 + Math.sin(this.elapsed * 3.2) * 0.08);
     this.hero.group.position.copy(position);
-    this.hero.group.quaternion.copy(surfaceOrientation(normal, this.playerHeading));
+    // Keep the reward pose aligned to the real horizon instead of the planet
+    // tangent. A tangent frame is physically correct on the sphere, but at a
+    // side-facing arena it can put Nova's feet toward the top of the screen.
+    // This stable world-up frame keeps the character readable through the
+    // whole crown beat while the stored heading preserves the D-pad facing.
+    const cinematicForward = forwardOnNormal(heading, WORLD_UP, new THREE.Vector3(0, 0, 1));
+    this.hero.group.quaternion.copy(surfaceOrientation(WORLD_UP, cinematicForward));
     this.hero.setRunCycle(0, this.elapsed, false);
 
     const orbit = this.elapsed * 0.9;
+    const cameraSide = new THREE.Vector3().crossVectors(WORLD_UP, cinematicForward).normalize();
+    if (cameraSide.lengthSq() < 0.001) cameraSide.set(1, 0, 0);
     const cameraPosition = position.clone()
-      .addScaledVector(normal, THREE.MathUtils.lerp(9.2, 11.4, beat))
-      .addScaledVector(side, Math.sin(orbit) * THREE.MathUtils.lerp(2.6, 4.6, beat))
-      .addScaledVector(this.playerHeading, 7.6 + Math.cos(orbit) * 2.2);
-    const cameraTarget = position.clone().addScaledVector(normal, 1.35);
+      .addScaledVector(WORLD_UP, THREE.MathUtils.lerp(7.8, 9.6, beat))
+      .addScaledVector(cameraSide, Math.sin(orbit) * THREE.MathUtils.lerp(2.8, 4.8, beat))
+      .addScaledVector(cinematicForward, 7.8 + Math.cos(orbit) * 2.2);
+    const cameraTarget = position.clone().addScaledVector(WORLD_UP, 1.1);
     this.camera.position.lerp(cameraPosition, 1 - Math.exp(-4.6 * delta));
     this.camera.up.copy(WORLD_UP);
     this.camera.lookAt(cameraTarget);
 
-    if (raw < 0.34) {
+    if (!cinematic.finale && raw < 0.34) {
+      this.setCinematicCopy('CROWN AWAKENED', cinematic.source === 'rings'
+        ? 'The ring relic answers Nova.'
+        : 'The Warden relic answers Nova.');
+    } else if (!cinematic.finale && raw < 0.78) {
+      this.setCinematicCopy('AURORA CROWN', 'One relic secured. The next light is still out there.');
+    } else if (raw < 0.34) {
       this.setCinematicCopy('AURORA CROWN', 'The Warden yields to Nova.');
     } else if (raw < 0.78) {
       this.setCinematicCopy('CROWN OF LIGHT', 'Dance beneath the final light.');
@@ -761,9 +799,21 @@ export class Game {
 
     if (raw < 1) return;
     this.bossVictoryCinematic = undefined;
-    this.phase = 'complete';
     this.hero.group.scale.setScalar(1);
     this.cinematicOverlay.classList.remove('is-active', 'is-boss-victory');
+    if (!cinematic.finale) {
+      this.phase = 'playing';
+      this.hud.classList.remove('is-hidden');
+      this.input?.setVisible(true);
+      this.cameraDistance = DEFAULT_CAMERA_DISTANCE;
+      this.audio.setCinematic(false);
+      this.audio.setBossTheme(this.activePlanet.isBossPlanet);
+      this.setCharacterAnimation('idle');
+      this.setStatus(`Aurora Crown relic claimed (${this.activePlanet.relicsCollected}/${this.activePlanet.relics.length}). Find the other crown.`);
+      this.updateUi();
+      return;
+    }
+    this.phase = 'complete';
     this.hud.classList.add('is-hidden');
     this.audio.setCinematic(false);
     this.completeScreen.classList.remove('is-hidden');
@@ -778,7 +828,7 @@ export class Game {
   private configureQaScenario(): void {
     if (!import.meta.env.DEV) return;
     const scenario = new URLSearchParams(window.location.search).get('qa');
-    if (scenario !== 'boss' && scenario !== 'victory' && scenario !== 'launch') return;
+    if (scenario !== 'boss' && scenario !== 'victory' && scenario !== 'crown' && scenario !== 'launch') return;
     if (scenario === 'launch') {
       const source = this.planets[0];
       const destination = this.planets[1];
@@ -808,6 +858,23 @@ export class Game {
     this.hero.group.quaternion.copy(surfaceOrientation(this.playerNormal, this.playerHeading));
     this.cameraDistance = 13;
     this.audio.setBossTheme(true);
+    if (scenario === 'crown') {
+      for (const coin of finalPlanet.coins.slice(0, finalPlanet.relicRingTarget)) {
+        if (coin.collected) continue;
+        coin.collected = true;
+        coin.mesh.visible = false;
+        this.coins += 1;
+      }
+      const ringRelic = finalPlanet.relics.find((relic) => relic.source === 'rings');
+      if (ringRelic) {
+        this.placePlayerAt(finalPlanet, ringRelic.normal);
+        this.playerHeading.copy(arenaNormal).projectOnPlane(this.playerNormal).normalize();
+        this.cameraHeading.copy(this.playerHeading);
+        finalPlanet.collectRelicNear(ringRelic.normal, 0.5);
+        this.beginBossVictory(false, 'rings');
+      }
+      return;
+    }
     this.setStatus(scenario === 'boss' ? 'QA boss arena: pounce the Crown Warden.' : 'QA victory cinematic: both Crown relics claimed.');
     if (scenario !== 'victory' || !finalPlanet.boss) return;
     for (const coin of finalPlanet.coins.slice(0, finalPlanet.relicRingTarget)) {
@@ -891,6 +958,8 @@ export class Game {
         ? 'Both Aurora Crown relics claimed - Nova is the Starbound Champion.'
         : planet.isRelicReady
           ? `Aurora Crown relics ${collectedRelics}/${totalRelics} - collect the glowing relics at the Warden arena.`
+          : collectedRelics > 0
+            ? 'Defeat the Crown Warden to claim the second Aurora Crown relic.'
           : `Defeat the Crown Warden or collect ${remaining} more ring${remaining === 1 ? '' : 's'} to awaken a relic.`;
     }
     if (planet.isBossPlanet && planet.boss) {

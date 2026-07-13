@@ -298,7 +298,7 @@ function createBoss(): THREE.Group {
 function createBossArena(color: number): THREE.Group {
   const group = new THREE.Group();
   const ring = new THREE.Mesh(
-    new THREE.TorusGeometry(2.75, 0.075, 8, 48),
+    new THREE.TorusGeometry(2.25, 0.065, 8, 48),
     new THREE.MeshStandardMaterial({
       color,
       emissive: color,
@@ -309,7 +309,7 @@ function createBossArena(color: number): THREE.Group {
   );
   ring.rotation.x = Math.PI / 2;
   const inner = new THREE.Mesh(
-    new THREE.CircleGeometry(2.68, 40),
+    new THREE.CircleGeometry(2.18, 40),
     new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.11, side: THREE.DoubleSide }),
   );
   inner.rotation.x = -Math.PI / 2;
@@ -318,7 +318,7 @@ function createBossArena(color: number): THREE.Group {
   for (let index = 0; index < 4; index += 1) {
     const pillar = new THREE.Mesh(pillarGeometry, pillarMaterial);
     const angle = index * Math.PI / 2 + Math.PI / 4;
-    pillar.position.set(Math.cos(angle) * 2.2, 0.72, Math.sin(angle) * 2.2);
+    pillar.position.set(Math.cos(angle) * 1.78, 0.62, Math.sin(angle) * 1.78);
     group.add(pillar);
   }
   group.add(ring, inner);
