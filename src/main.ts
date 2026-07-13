@@ -11,6 +11,10 @@ if (new URLSearchParams(window.location.search).get('harness') === 'orientation'
   void import('./harness/CharacterOrientationHarness').then(({ CharacterOrientationHarness }) => {
     new CharacterOrientationHarness(app).start();
   });
+} else if (new URLSearchParams(window.location.search).get('harness') === 'assets') {
+  void import('./harness/AssetHarness').then(({ AssetHarness }) => {
+    new AssetHarness(app).start();
+  });
 } else {
   new Game(app).start();
 }

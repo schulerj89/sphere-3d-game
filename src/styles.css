@@ -129,6 +129,12 @@ body {
 .harness-rig-label-left { left: 25%; transform: translateX(-50%); }
 .harness-rig-label-right { right: 25%; transform: translateX(50%); }
 
+.asset-harness-panel { width: min(700px, calc(100vw - 32px)); }
+.asset-harness-label-left { left: 25%; transform: translateX(-50%); color: #9eeeff; }
+.asset-harness-label-right { right: 25%; transform: translateX(50%); color: #ffe19a; }
+.asset-swatch-external { background: #6ee7ff; box-shadow: 0 0 10px #6ee7ff; }
+.asset-swatch-fallback { background: #ffcb66; box-shadow: 0 0 10px #ffcb66; }
+
 button {
   font: inherit;
 }

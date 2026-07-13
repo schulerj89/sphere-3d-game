@@ -1,5 +1,5 @@
 type SoundName = 'confirm' | 'jump' | 'coin' | 'attack' | 'pounce' | 'hit' | 'launch' | 'complete';
-type MusicTrack = 'gameplay' | 'cinematic';
+type MusicTrack = 'gameplay' | 'cinematic' | 'boss';
 
 const audioPath = (path: string): string => `${import.meta.env.BASE_URL}assets/audio/${path}`;
 
@@ -14,11 +14,13 @@ export class AudioDirector {
   private loopTimer: number | undefined;
   private music: HTMLAudioElement | undefined;
   private musicSource: string | undefined;
+  private musicError: string | undefined;
   private muted = false;
   private usingAssetMusic = false;
   private bossThemeActive = false;
   private requestedBossTheme = false;
   private cinematicActive = false;
+  private unlockListenersBound = false;
 
   start(): void {
     if (!this.context) {
@@ -30,9 +32,16 @@ export class AudioDirector {
       this.musicGain.gain.value = 0.19;
       this.musicGain.connect(this.master);
     }
+    this.bindUnlockListeners();
+    this.ensureMusicElement();
     this.resumeContext();
     if (this.requestedBossTheme) this.startBossTheme();
     else this.setMusicTrack('gameplay');
+    // `start` is called from the title button's click handler. Starting the
+    // persistent element here keeps the browser's user-activation grant alive
+    // for later planet/boss transitions instead of creating a new autoplay
+    // candidate after the cinematic has already started.
+    void this.tryPlayMusic().catch(() => undefined);
   }
 
   setCinematic(active: boolean): void {
@@ -44,7 +53,7 @@ export class AudioDirector {
     this.setMusicTrack(active ? 'cinematic' : 'gameplay');
   }
 
-  /** Switches to a procedural boss motif so the final encounter needs no extra audio payload. */
+  /** Switches to the boss music floor and layers the procedural Warden motif when Web Audio is available. */
   setBossTheme(active: boolean): void {
     this.requestedBossTheme = active;
     this.resumeContext();
@@ -70,6 +79,7 @@ export class AudioDirector {
     this.muted = !this.muted;
     if (this.master) this.master.gain.value = this.muted ? 0 : 0.42;
     if (this.music) this.music.muted = this.muted;
+    if (!this.muted) void this.tryPlayMusic().catch(() => undefined);
     return this.muted;
   }
 
@@ -98,9 +108,39 @@ export class AudioDirector {
     void effect.play().catch(() => this.playSynthEffect(sound));
   }
 
+  debugSnapshot(): {
+    contextState: AudioContextState | 'uninitialized';
+    musicSource: string;
+    bossThemeActive: boolean;
+    usingAssetMusic: boolean;
+    musicPaused: boolean;
+    musicVolume: number;
+    musicReadyState: number;
+    musicError: string;
+  } {
+    return {
+      contextState: this.context?.state ?? 'uninitialized',
+      musicSource: this.musicSource ?? 'none',
+      bossThemeActive: this.bossThemeActive,
+      usingAssetMusic: this.usingAssetMusic,
+      musicPaused: this.music?.paused ?? true,
+      musicVolume: this.music?.volume ?? 0,
+      musicReadyState: this.music?.readyState ?? 0,
+      musicError: this.musicError ?? 'none',
+    };
+  }
+
   dispose(): void {
     if (this.loopTimer !== undefined) window.clearTimeout(this.loopTimer);
+    if (this.unlockListenersBound) {
+      window.removeEventListener('pointerdown', this.unlockFromGesture);
+      window.removeEventListener('keydown', this.unlockFromGesture);
+      this.unlockListenersBound = false;
+    }
     this.music?.pause();
+    this.music?.removeAttribute('src');
+    this.music?.load();
+    this.music?.remove();
     this.music = undefined;
     this.requestedBossTheme = false;
     this.bossThemeActive = false;
@@ -110,60 +150,126 @@ export class AudioDirector {
   private startBossTheme(): void {
     if (!this.context || !this.musicGain || this.bossThemeActive) return;
     this.bossThemeActive = true;
-    this.music?.pause();
-    this.music = undefined;
-    this.musicSource = 'boss-synth';
-    // The synth is intentionally not marked as an asset track: this keeps the
-    // scheduler alive even when the prior gameplay MP3 failed to load.
+    // The old boss-only oscillator path could be scheduled while the mobile
+    // AudioContext was still suspended after the transfer cinematic. Use the
+    // already-proven CC0 gameplay MP3 as an audible floor, then fall back to
+    // the synth motif only if that asset cannot start.
     this.usingAssetMusic = false;
-    // Synthesized boss music is intentionally louder than the ambient score
-    // so the third-planet arrival and combat beat cannot sound silent on
-    // mobile speakers after a long transition.
-    this.musicGain.gain.value = 0.27;
+    this.musicGain.gain.value = 0.32;
     if (this.loopTimer !== undefined) {
       window.clearTimeout(this.loopTimer);
       this.loopTimer = undefined;
     }
-    this.scheduleBossMusic();
+    this.setMusicTrack('boss');
   }
 
   private setMusicTrack(track: MusicTrack, useCc0Fallback = false): void {
-    const source = track === 'gameplay'
-      ? useCc0Fallback ? 'cc0-gameplay' : 'elevenlabs-gameplay'
-      : 'cc0-cinematic';
-    if (this.musicSource === source && this.music) return;
-    this.music?.pause();
-    const file = source === 'elevenlabs-gameplay'
-      ? 'music/elevenlabs-starbound-sprint.mp3'
-      : source === 'cc0-gameplay'
-        ? 'music/orbital-action.mp3'
-        : 'music/space-flight.mp3';
-    const next = new Audio(audioPath(file));
+    const source = track === 'boss'
+      ? 'boss-asset'
+      : track === 'gameplay'
+        ? useCc0Fallback ? 'cc0-gameplay' : 'elevenlabs-gameplay'
+        : 'cc0-cinematic';
+    if (this.musicSource === source && this.music) {
+      void this.tryPlayMusic().catch(() => undefined);
+      return;
+    }
+    const file = track === 'boss'
+      ? 'music/orbital-action.mp3'
+      : source === 'elevenlabs-gameplay'
+        ? 'music/elevenlabs-starbound-sprint.mp3'
+        : source === 'cc0-gameplay'
+          ? 'music/orbital-action.mp3'
+          : 'music/space-flight.mp3';
+    const next = this.ensureMusicElement();
+    const nextSrc = audioPath(file);
+    if (next.src !== new URL(nextSrc, document.baseURI).href) {
+      next.src = nextSrc;
+      next.load();
+    }
     next.loop = true;
-    next.volume = track === 'gameplay' ? 0.36 : 0.3;
+    next.volume = track === 'boss' ? 0.5 : track === 'gameplay' ? 0.36 : 0.3;
     next.muted = this.muted;
     this.music = next;
     this.musicSource = source;
     this.usingAssetMusic = false;
-    void next.play().then(() => {
+    this.musicError = undefined;
+    this.tryPlayMusic().then(() => {
       if (this.music !== next) return;
       this.usingAssetMusic = true;
-      if (this.loopTimer !== undefined) {
+      if (track !== 'boss' && this.loopTimer !== undefined) {
         window.clearTimeout(this.loopTimer);
         this.loopTimer = undefined;
       }
-    }).catch(() => {
+    }).catch((error: unknown) => {
       if (this.music !== next || this.usingAssetMusic) return;
+      this.musicError = this.describeMediaError(error, next);
       if (track === 'gameplay' && !useCc0Fallback) {
         this.setMusicTrack('gameplay', true);
+      } else if (track === 'boss') {
+        // Keep an audible CC0 floor if the optional boss file is unavailable;
+        // the Warden synth is layered only after AudioContext is running.
+        this.setMusicTrack('gameplay', true);
+        this.scheduleBossMusic();
       } else if (this.loopTimer === undefined) {
         this.scheduleMusic();
       }
     });
   }
 
+  private ensureMusicElement(): HTMLAudioElement {
+    if (!this.music) {
+      const element = new Audio();
+      element.preload = 'auto';
+      element.loop = true;
+      element.setAttribute('playsinline', '');
+      element.setAttribute('aria-hidden', 'true');
+      element.style.display = 'none';
+      document.body.appendChild(element);
+      this.music = element;
+    }
+    return this.music;
+  }
+
+  private bindUnlockListeners(): void {
+    if (this.unlockListenersBound) return;
+    window.addEventListener('pointerdown', this.unlockFromGesture, { passive: true });
+    window.addEventListener('keydown', this.unlockFromGesture);
+    this.unlockListenersBound = true;
+  }
+
+  private readonly unlockFromGesture = (): void => {
+    this.resumeContext();
+    if (this.music && this.music.paused && !this.muted) void this.tryPlayMusic().catch(() => undefined);
+  };
+
+  private tryPlayMusic(): Promise<void> {
+    const current = this.music;
+    if (!current || this.muted) return Promise.resolve();
+    return current.play().then(() => {
+      if (this.music === current) {
+        this.usingAssetMusic = true;
+        this.musicError = undefined;
+      }
+    }).catch((error: unknown) => {
+      if (this.music === current) this.musicError = this.describeMediaError(error, current);
+      throw error;
+    });
+  }
+
+  private describeMediaError(error: unknown, element: HTMLAudioElement): string {
+    if (error instanceof DOMException) return `${error.name}:${element.error?.code ?? 0}`;
+    if (element.error) return `media:${element.error.code}`;
+    return error instanceof Error ? error.name : 'playback-failed';
+  }
+
   private playSynthEffect(sound: SoundName): void {
     if (!this.context || !this.master || this.muted) return;
+    if (this.context.state !== 'running') {
+      void this.context.resume().then(() => {
+        if (this.context?.state === 'running') this.playSynthEffect(sound);
+      }).catch(() => undefined);
+      return;
+    }
     const now = this.context.currentTime;
     const profile: Record<SoundName, [number, number, number, OscillatorType]> = {
       confirm: [420, 740, 0.13, 'triangle'],
@@ -176,14 +282,15 @@ export class AudioDirector {
       complete: [392, 1174, 0.9, 'triangle'],
     };
     const [start, end, length, type] = profile[sound];
-    this.tone(start, end, length, type, sound === 'hit' ? 0.12 : 0.09, now, this.master);
+    const primaryVolume = sound === 'hit' ? 0.12 : sound === 'coin' ? 0.24 : 0.09;
+    this.tone(start, end, length, type, primaryVolume, now, this.master);
     if (sound === 'coin' || sound === 'complete') {
-      this.tone(end * 0.75, end * 1.06, length * 0.8, 'sine', 0.055, now + 0.07, this.master);
+      this.tone(end * 0.75, end * 1.06, length * 0.8, 'sine', sound === 'coin' ? 0.13 : 0.055, now + 0.07, this.master);
     }
   }
 
   private scheduleMusic(): void {
-    if (!this.context || !this.musicGain || this.usingAssetMusic) return;
+    if (!this.context || !this.musicGain || this.usingAssetMusic || this.context.state !== 'running') return;
     const now = this.context.currentTime + 0.08;
     const phrase = [
       [220, 0], [277.18, 0.38], [329.63, 0.76], [440, 1.14],
@@ -201,7 +308,7 @@ export class AudioDirector {
   }
 
   private scheduleBossMusic(): void {
-    if (!this.context || !this.musicGain || !this.bossThemeActive) return;
+    if (!this.context || !this.musicGain || !this.bossThemeActive || this.context.state !== 'running') return;
     this.resumeContext();
     const now = this.context.currentTime + 0.08;
     const phrase = [
@@ -220,7 +327,12 @@ export class AudioDirector {
   }
 
   private resumeContext(): void {
-    if (this.context && this.context.state === 'suspended') void this.context.resume();
+    if (!this.context || this.context.state !== 'suspended') return;
+    void this.context.resume().then(() => {
+      if (this.loopTimer !== undefined) return;
+      if (this.bossThemeActive && !this.usingAssetMusic) this.scheduleBossMusic();
+      else if (!this.bossThemeActive && !this.usingAssetMusic) this.scheduleMusic();
+    }).catch(() => undefined);
   }
 
   private tone(start: number, end: number, length: number, type: OscillatorType, volume: number, when: number, destination: AudioNode): void {

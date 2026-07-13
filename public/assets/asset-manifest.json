@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "generatedOn": "2026-07-12",
   "licensePolicy": "CC0-1.0 bundled third-party media; Eleven Music output is governed by the generating account's ElevenLabs Music Terms and is embedded only as game soundtrack.",
-  "totalIncludedBytes": 7813533,
+  "totalIncludedBytes": 7843445,
   "loadPolicy": {
     "model": "Load after the procedural player and playable scene exist; retain the procedural fallback if this request fails.",
     "audio": "Begin playback only after a user gesture. Decode short SFX once and reuse them."
@@ -39,6 +39,23 @@
         "materials": 1,
         "textures": 1,
         "nodes": 54
+      }
+    },
+    {
+      "id": "kenney-gate-complex",
+      "kind": "model/gltf-binary",
+      "url": "assets/portals/kenney-gate-complex.glb",
+      "bytes": 29912,
+      "sha256": "6c0914bd5886928760fab54fc602aafd1441314a7c08c9cd30fad2a3f9191b90",
+      "license": "CC0-1.0",
+      "sourceUrl": "https://kenney.nl/media/pages/assets/space-kit/20874c75ac-1677698978/kenney_space-kit.zip",
+      "sourcePage": "https://kenney.nl/assets/space-kit",
+      "intendedUse": "Imported launch-gate prop on each sphere; retain procedural launch portal if the GLB request fails.",
+      "validated": {
+        "glbVersion": 2,
+        "embeddedImages": 0,
+        "animationClips": 0,
+        "sourcePackage": "Space Kit 2.0 / Models/GLTF format/gate_complex.glb"
       }
     },
     {

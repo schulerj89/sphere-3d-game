@@ -18,6 +18,11 @@ cinematic orbital transfers.
 
 For render and asset counters, append `?debug=1` to the local or hosted URL.
 
+The portal can be reviewed outside the game camera at `?harness=assets` (for
+example, `http://localhost:5173/?harness=assets`). The harness places the
+Kenney gate beside the procedural fallback and reports the imported mesh
+triangle count before it is enabled on the spheres.
+
 ## Local development
 
 ```bash

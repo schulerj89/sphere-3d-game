@@ -390,6 +390,8 @@ function createRelic(): THREE.Group {
 
 function createLaunchPad(color: number): THREE.Group {
   const group = new THREE.Group();
+  const procedural = new THREE.Group();
+  procedural.name = 'procedural-launch-portal';
   const material = new THREE.MeshStandardMaterial({
     color,
     emissive: color,
@@ -409,7 +411,26 @@ function createLaunchPad(color: number): THREE.Group {
     new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.38 }),
   );
   beacon.position.y = 1.15;
-  group.add(ring, inner, beacon);
+  procedural.add(ring, inner, beacon);
+
+  // This energy core remains behind either portal art so the launch target
+  // still reads clearly when a low-bandwidth device uses the fallback.
+  const energyRing = new THREE.Mesh(
+    new THREE.TorusGeometry(0.78, 0.045, 8, 40),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.58, blending: THREE.AdditiveBlending, depthWrite: false }),
+  );
+  energyRing.rotation.x = Math.PI / 2;
+  energyRing.position.y = 0.08;
+  const energyCore = new THREE.Mesh(
+    new THREE.CircleGeometry(0.72, 32),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.14, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }),
+  );
+  energyCore.rotation.x = -Math.PI / 2;
+  energyCore.position.y = 0.065;
+  const energy = new THREE.Group();
+  energy.name = 'launch-energy-core';
+  energy.add(energyRing, energyCore);
+  group.add(procedural, energy);
   return group;
 }
 
@@ -749,6 +770,35 @@ export class Planet {
 
   worldPosition(normal: THREE.Vector3, height = 0): THREE.Vector3 {
     return normal.clone().multiplyScalar(this.definition.radius + height).add(this.definition.center);
+  }
+
+  /**
+   * Replaces the synchronous launch-pad art with a shared imported prop while
+   * keeping the procedural group available as a load-failure fallback.
+   */
+  attachLaunchPortal(source: THREE.Object3D): void {
+    const model = source.clone(true);
+    model.name = 'kenney launch gate';
+    model.traverse((node) => {
+      if (node instanceof THREE.Mesh) {
+        node.castShadow = false;
+        node.receiveShadow = false;
+      }
+    });
+    const bounds = new THREE.Box3().setFromObject(model);
+    const sourceSize = bounds.getSize(new THREE.Vector3());
+    const targetSize = 3.7;
+    const scale = targetSize / Math.max(0.001, Math.max(sourceSize.x, sourceSize.y, sourceSize.z));
+    model.scale.setScalar(scale);
+    model.rotation.y = Math.PI;
+    const scaledBounds = new THREE.Box3().setFromObject(model);
+    const center = scaledBounds.getCenter(new THREE.Vector3());
+    model.position.set(-center.x, -scaledBounds.min.y + 0.28, -center.z);
+    const fallback = this.launchPad.getObjectByName('procedural-launch-portal');
+    if (fallback) fallback.visible = false;
+    const previous = this.launchPad.getObjectByName('kenney launch gate');
+    if (previous) this.launchPad.remove(previous);
+    this.launchPad.add(model);
   }
 
   collectNear(normal: THREE.Vector3, threshold = 1.15): Coin | undefined {

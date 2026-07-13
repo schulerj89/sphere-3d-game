@@ -64,6 +64,7 @@ interface StarboundDebugSnapshot {
     readonly geometries: number;
     readonly textures: number;
   };
+  readonly audio: ReturnType<AudioDirector['debugSnapshot']>;
 }
 
 declare global {
@@ -198,7 +199,7 @@ export class Game {
     this.bindUi();
     this.resize();
     this.updateUi();
-    void this.loadCharacterModel().then(this.finishLoading);
+    void Promise.all([this.loadCharacterModel(), this.loadLaunchPortalModel()]).then(this.finishLoading);
     window.addEventListener('resize', this.resize);
     window.__starboundDebug = () => this.debugSnapshot();
   }
@@ -678,7 +679,10 @@ export class Game {
 
   private beginDefeat(): void {
     const facing = forwardOnNormal(this.playerHeading, WORLD_UP, new THREE.Vector3(0, 0, 1));
-    const fallAxis = new THREE.Vector3().crossVectors(WORLD_UP, facing).normalize();
+    // Tip Nova around the tangent side-axis of the sphere. The previous
+    // world-up axis kept the portrait readable, but let the rig's feet and
+    // torso rotate into a side-facing planet during the fall.
+    const fallAxis = new THREE.Vector3().crossVectors(this.playerNormal, facing).normalize();
     if (fallAxis.lengthSq() < 0.001) fallAxis.set(1, 0, 0);
     this.phase = 'defeat';
     this.defeatCinematic = {
@@ -716,20 +720,21 @@ export class Game {
     const side = new THREE.Vector3().crossVectors(normal, heading).normalize();
     if (side.lengthSq() < 0.001) side.set(1, 0, 0);
 
-    // Impact, a visible backward fall, then a quiet final pose. The model uses
-    // a world-up frame during this beat so a side-facing planet cannot turn the
-    // character upside down while the camera makes its full orbit.
+    // Impact, a visible backward fall, then a quiet final pose. Keep the
+    // model's local up aligned to the sphere normal and give the body a small
+    // outward cushion; this prevents the rig from visually tunneling through
+    // a side-facing sphere while the camera makes its full orbit.
     const impact = 1 - smoothstep(Math.min(1, raw / 0.2));
     const fall = smoothstep(Math.min(1, Math.max(0, (raw - 0.08) / 0.46)));
     const settle = smoothstep(Math.min(1, Math.max(0, (raw - 0.72) / 0.28)));
-    const lift = THREE.MathUtils.lerp(0.22, 0.08, settle) + (1 - fall) * 0.34;
+    const lift = THREE.MathUtils.lerp(0.72, 0.5, settle) + (1 - fall) * 0.18;
     const shake = Math.sin(this.elapsed * 56) * impact * 0.08;
     const position = cinematic.origin.clone()
       .addScaledVector(normal, lift + shake)
       .addScaledVector(heading, -fall * 0.92)
       .addScaledVector(side, Math.sin(this.elapsed * 8) * impact * 0.08);
     this.hero.group.position.copy(position);
-    const baseOrientation = surfaceOrientation(WORLD_UP, heading);
+    const baseOrientation = surfaceOrientation(normal, heading);
     const fallRotation = new THREE.Quaternion().setFromAxisAngle(cinematic.fallAxis, -fall * Math.PI * 0.42);
     baseOrientation.premultiply(fallRotation);
     this.hero.group.quaternion.copy(baseOrientation);
@@ -1049,7 +1054,8 @@ export class Game {
     if (window.location.search.includes('debug=1')) {
       this.debugText.classList.add('is-visible');
       const info = this.renderer.info;
-      this.debugText.textContent = `${Math.round(this.fps)} FPS · ${info.render.calls} calls · ${info.render.triangles.toLocaleString()} tris · ${info.memory.geometries} geo`;
+      const audio = this.audio.debugSnapshot();
+      this.debugText.textContent = `${Math.round(this.fps)} FPS | ${info.render.calls} calls | ${info.render.triangles.toLocaleString()} tris | ${info.memory.geometries} geo | audio:${audio.musicSource}/${audio.contextState}/${audio.musicPaused ? 'paused' : 'playing'} | ready:${audio.musicReadyState} | err:${audio.musicError}`;
     }
   }
 
@@ -1086,6 +1092,7 @@ export class Game {
         geometries: info.memory.geometries,
         textures: info.memory.textures,
       },
+      audio: this.audio.debugSnapshot(),
     };
   }
 
@@ -1157,6 +1164,30 @@ export class Game {
     } catch {
       this.assetErrors.push('kaykit-rogue: loader failed to initialize; using the procedural hero');
       this.hero.showFallback();
+    }
+  }
+
+  private async loadLaunchPortalModel(): Promise<void> {
+    try {
+      const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
+      const loader = new GLTFLoader();
+      await new Promise<void>((resolve) => {
+        loader.load(
+          assetPath('assets/portals/kenney-gate-complex.glb'),
+          (gltf) => {
+            for (const planet of this.planets) planet.attachLaunchPortal(gltf.scene);
+            this.loadedAssetIds.push('kenney-gate-complex');
+            resolve();
+          },
+          undefined,
+          () => {
+            this.assetErrors.push('kenney-gate-complex: failed to load; using procedural launch portal');
+            resolve();
+          },
+        );
+      });
+    } catch {
+      this.assetErrors.push('kenney-gate-complex: loader failed to initialize; using procedural launch portal');
     }
   }
 

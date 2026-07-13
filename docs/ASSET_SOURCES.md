@@ -7,6 +7,7 @@ This repository uses only assets whose source page and license were checked on 2
 | ID | Source and license | Intended use | Downloaded size | Runtime path | Integration notes |
 | --- | --- | --- | ---: | --- | --- |
 | `kaykit-rogue` | [KayKit Character Pack: Adventures](https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0), [CC0 license](https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0/blob/main/LICENSE.txt) | Primary player character | `Rogue.glb`: 3,616,284 bytes (3.45 MiB) | `public/assets/characters/kaykit-rogue.glb` | Official KayKit source. The package describes four low-poly, textured, rigged characters with 75 animations and GLTF support. The downloaded GLB validates as glTF 2.0 with one skin, one embedded image, 76 named clips, 6,377 triangles, 12 mesh primitives, one material, and one texture. Use `Idle`, `Running_A`, `Jump_Start`, `Jump_Full_Long`, `Jump_Land`, and `Unarmed_Melee_Attack_Kick` for the prototype; keep the procedural capsule player as the synchronous fallback if the request fails. |
+| `kenney-gate-complex` | [Kenney Space Kit](https://kenney.nl/assets/space-kit), [CC0 license](https://creativecommons.org/publicdomain/zero/1.0/) | Imported launch portal | `gate_complex.glb`: 29,912 bytes | `public/assets/portals/kenney-gate-complex.glb` | The official Space Kit 2.0 package includes GLB exports. The imported gate is staged and scaled at runtime for every sphere; the existing procedural portal remains the load-failure fallback. |
 | `space-flight` | [Space Flight by wipics](https://opengameart.org/content/space-flight), [CC0](https://creativecommons.org/publicdomain/zero/1.0/) | Ambient title screen and sphere-transfer cinematic loop | `space_flight_0.mp3`: 897,484 bytes; 37.224 s | `public/assets/audio/music/space-flight.mp3` | The source labels this a space/galaxy ambient loop. Start only after a user gesture, set `loop = true`, and keep it out of the first render path. |
 | `orbital-action` | [8-bit Epic Space Shooter Music by HydroGene](https://opengameart.org/content/8-bit-epic-space-shooter-music), [CC0](https://creativecommons.org/publicdomain/zero/1.0/) | Upbeat exploratory gameplay loop | `8bit-spaceshooter.mp3`: 1,976,181 bytes; 82.338 s | `public/assets/audio/music/orbital-action.mp3` | The source states that the track loops seamlessly. Use a single `HTMLAudioElement` or Web Audio buffer; do not create an instance per scene. Its energetic space tone is a compact demo-safe substitute while bespoke music is evaluated. |
 | `elevenlabs-starbound-sprint` | [Eleven Music compose API](https://elevenlabs.io/docs/api-reference/music/compose), [Music Terms](https://elevenlabs.io/music-terms) | Primary bespoke gameplay loop | `elevenlabs-starbound-sprint.mp3`: 721,442 bytes; 45.087 s | `public/assets/audio/music/elevenlabs-starbound-sprint.mp3` | Generated on 2026-07-12 with Eleven Music v2, song ID `VXHiYl0ZiBBSOi4FL9Ew`, from an original instrumental prompt that excludes artists, franchises, songs, vocals, and lyrics. It is embedded only as this game's soundtrack—not CC0 and not a standalone redistributable file. The runtime falls back to `orbital-action` if this track cannot load. |
@@ -23,6 +24,7 @@ This repository uses only assets whose source page and license were checked on 2
 These exact URLs are the download provenance recorded in the asset manifest:
 
 - `https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0/main/addons/kaykit_character_pack_adventures/Characters/gltf/Rogue.glb`
+- `https://kenney.nl/media/pages/assets/space-kit/20874c75ac-1677698978/kenney_space-kit.zip` (runtime file: `Models/GLTF format/gate_complex.glb`)
 - `https://opengameart.org/sites/default/files/space_flight_0.mp3`
 - `https://opengameart.org/sites/default/files/8bit-spaceshooter.mp3`
 - `https://opengameart.org/sites/default/files/button.wav`
@@ -34,7 +36,7 @@ These exact URLs are the download provenance recorded in the asset manifest:
 
 ## Browser budget and loading contract
 
-The selected set is 7,813,533 bytes (7.45 MiB) before HTTP compression. It is deliberately below the 40 MB initial-GLB guideline and keeps the only GLB below the 6 MB reusable-prop ceiling. SHA-256 values and validated animation aliases are in `public/assets/asset-manifest.json`.
+The selected set is 7,843,445 bytes (7.48 MiB) before HTTP compression. It is deliberately below the 40 MB initial-GLB guideline and keeps every reusable GLB below the 6 MB prop ceiling. SHA-256 values and validated animation aliases are in `public/assets/asset-manifest.json`.
 
 1. Render the procedural player, HUD, and title screen first.
 2. Load `kaykit-rogue` after the playable scene is constructed. If it rejects or contains no usable clips, retain the procedural player and log the manifest ID.
