@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "generatedOn": "2026-07-12",
   "licensePolicy": "CC0-1.0 bundled third-party media; Eleven Music output is governed by the generating account's ElevenLabs Music Terms and is embedded only as game soundtrack.",
-  "totalIncludedBytes": 7843445,
+  "totalIncludedBytes": 9292777,
   "loadPolicy": {
     "model": "Load after the procedural player and playable scene exist; retain the procedural fallback if this request fails.",
     "audio": "Begin playback only after a user gesture. Decode short SFX once and reuse them."
@@ -39,6 +39,52 @@
         "materials": 1,
         "textures": 1,
         "nodes": 54
+      }
+    },
+    {
+      "id": "quaternius-hazmat",
+      "kind": "model/gltf-binary",
+      "url": "assets/characters/quaternius-hazmat.glb",
+      "bytes": 1401712,
+      "sha256": "f67568a99e3b5cbc8ac6c77523563116f8739a3f71ec35ec3dbc05a3a550333d",
+      "license": "CC0-1.0",
+      "sourceUrl": "https://static.poly.pizza/484450a4-b76c-4e76-95d2-352337bb41e8.glb",
+      "sourcePage": "https://poly.pizza/m/z3TSQYx1Kn",
+      "intendedUse": "Primary colorful space-suit player model; hide bundled firearm variants and use the game's two-slot weapon presentation.",
+      "animationAliases": {
+        "idle": "CharacterArmature|Idle",
+        "run": "CharacterArmature|Run",
+        "jumpStart": "CharacterArmature|Jump",
+        "jumpAir": "CharacterArmature|Jump_Idle",
+        "jumpLand": "CharacterArmature|Jump_Land",
+        "pounce": "CharacterArmature|Punch",
+        "hurt": "CharacterArmature|HitReact",
+        "celebrate": "CharacterArmature|Wave"
+      },
+      "validated": {
+        "glbVersion": 2,
+        "embeddedImages": 1,
+        "animationClips": 17,
+        "meshes": 76,
+        "triangles": 20346
+      }
+    },
+    {
+      "id": "quaternius-aurora-crown",
+      "kind": "model/gltf-binary",
+      "url": "assets/relics/quaternius-aurora-crown.glb",
+      "bytes": 47620,
+      "sha256": "c2b598cfd997ab367e2036a77d186cc02f5d2a0410209e49237b55d383c68e88",
+      "license": "CC0-1.0",
+      "sourceUrl": "https://static.poly.pizza/1381b02a-8310-437b-a2a7-82cab0a94a4c.glb",
+      "sourcePage": "https://poly.pizza/m/i0PZVuVlYv",
+      "intendedUse": "Cloned Aurora Crown relic mesh; retain the procedural cyan aura as an emissive readability fallback.",
+      "validated": {
+        "glbVersion": 2,
+        "embeddedImages": 0,
+        "animationClips": 0,
+        "meshes": 2,
+        "triangles": 840
       }
     },
     {

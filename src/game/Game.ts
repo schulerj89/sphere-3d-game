@@ -1150,61 +1150,72 @@ export class Game {
     try {
       const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
       const loader = new GLTFLoader();
-      await new Promise<void>((resolve) => {
-        loader.load(
-          assetPath('assets/characters/kaykit-rogue.glb'),
-          (gltf) => {
-            try {
-              const model = gltf.scene;
-              model.traverse((node) => {
-                if (node instanceof THREE.Mesh) {
-                  node.castShadow = false;
-                  node.receiveShadow = false;
-                }
-              });
-              const sourceBounds = new THREE.Box3().setFromObject(model);
-              const sourceHeight = sourceBounds.getSize(new THREE.Vector3()).y;
-              model.scale.setScalar(2.52 / Math.max(0.001, sourceHeight));
-              const scaledBounds = new THREE.Box3().setFromObject(model);
-              model.position.y = -scaledBounds.min.y;
-              // The KayKit rig already faces +Z, which is the game movement axis.
-              this.hero.attachModel(model);
-              this.modelMixer = new THREE.AnimationMixer(model);
-              const aliases: Record<string, string> = {
-                idle: 'Idle',
-                run: 'Running_A',
-                jumpStart: 'Jump_Start',
-                jumpAir: 'Jump_Full_Long',
-                // Nova carries a crossbow in the right hand and a knife in the
-                // left. The 1H slice only drives the active right-hand weapon,
-                // which made the knife look frozen. Use the authored dual-wield
-                // slice so both hand slots move during every attack.
-                pounce: 'Dualwield_Melee_Attack_Slice',
-                hurt: 'Hit_A',
-                celebrate: 'Cheer',
-              };
-              for (const [name, clipName] of Object.entries(aliases)) {
-                const clip = THREE.AnimationClip.findByName(gltf.animations, clipName);
-                if (clip) this.modelActions.set(name, this.modelMixer.clipAction(clip));
-              }
-              this.loadedAssetIds.push('kaykit-rogue');
-              this.setCharacterAnimation('idle');
-            } catch (error) {
-              this.assetErrors.push(`kaykit-rogue: ${error instanceof Error ? error.message : String(error)}`);
-              this.hero.showFallback();
-            }
-            resolve();
-          },
-          undefined,
-          () => {
-            this.assetErrors.push('kaykit-rogue: failed to load; using the procedural hero');
-            this.hero.showFallback();
-            resolve();
-          },
-        );
+      const load = (url: string): Promise<{ scene: THREE.Group; animations: THREE.AnimationClip[] } | undefined> => new Promise((resolve) => {
+        loader.load(url, (gltf) => resolve({ scene: gltf.scene, animations: gltf.animations }), undefined, () => resolve(undefined));
       });
+      // Quaternius' hazmat explorer better matches the game's colorful space
+      // theme. Keep KayKit as a second authored fallback so a CDN/cache miss
+      // never exposes the procedural placeholder during normal startup.
+      const authored = await load(assetPath('assets/characters/quaternius-hazmat.glb'));
+      const fallback = authored ? undefined : await load(assetPath('assets/characters/kaykit-rogue.glb'));
+      const imported = authored ?? fallback;
+      const model = imported?.scene;
+      const clips = imported?.animations ?? [];
+      const sourceId = authored ? 'quaternius-hazmat' : fallback ? 'kaykit-rogue' : undefined;
+      if (!model || !sourceId) {
+        this.assetErrors.push('quaternius-hazmat and kaykit-rogue: failed to load; using the procedural hero');
+        this.hero.showFallback();
+        return;
+      }
+      model.traverse((node) => {
+        if (node instanceof THREE.Mesh) {
+          node.castShadow = false;
+          node.receiveShadow = false;
+        }
+        // The toon-shooter GLB contains every gun/knife variant in one file.
+        // Hide those props; the game's dedicated two-slot weapon presentation
+        // owns the visible loadout and avoids the previous weapon pile-up.
+        if (/^(Revolver|Sniper|Pistol|SMG|GrenadeLauncher|ShortCannon|Shotgun|RocketLauncher|AK|Shovel|Knife)/.test(node.name)) {
+          node.visible = false;
+        }
+      });
+      const sourceBounds = new THREE.Box3().setFromObject(model);
+      const sourceHeight = sourceBounds.getSize(new THREE.Vector3()).y;
+      model.scale.setScalar(2.52 / Math.max(0.001, sourceHeight));
+      const scaledBounds = new THREE.Box3().setFromObject(model);
+      model.position.y = -scaledBounds.min.y;
+      this.hero.attachModel(model);
+      this.modelMixer = new THREE.AnimationMixer(model);
+      const aliases: Record<string, string> = authored
+        ? {
+          idle: 'CharacterArmature|Idle',
+          run: 'CharacterArmature|Run',
+          jumpStart: 'CharacterArmature|Jump',
+          jumpAir: 'CharacterArmature|Jump_Idle',
+          jumpLand: 'CharacterArmature|Jump_Land',
+          pounce: 'CharacterArmature|Punch',
+          hurt: 'CharacterArmature|HitReact',
+          celebrate: 'CharacterArmature|Wave',
+        }
+        : {
+          idle: 'Idle',
+          run: 'Running_A',
+          jumpStart: 'Jump_Start',
+          jumpAir: 'Jump_Full_Long',
+          pounce: 'Dualwield_Melee_Attack_Slice',
+          hurt: 'Hit_A',
+          celebrate: 'Cheer',
+        };
+      // GLB clips are prefixed with their armature name; findByName keeps the
+      // aliases readable and preserves KayKit's legacy names as a fallback.
+      for (const [name, clipName] of Object.entries(aliases)) {
+        const clip = THREE.AnimationClip.findByName(clips, clipName);
+        if (clip) this.modelActions.set(name, this.modelMixer.clipAction(clip));
+      }
+      this.loadedAssetIds.push(sourceId);
+      this.setCharacterAnimation('idle');
     } catch {
-      this.assetErrors.push('kaykit-rogue: loader failed to initialize; using the procedural hero');
+      this.assetErrors.push('quaternius-hazmat: loader failed to initialize; using the procedural hero');
       this.hero.showFallback();
     }
   }
