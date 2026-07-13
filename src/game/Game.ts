@@ -636,7 +636,7 @@ export class Game {
         .addScaledVector(openingRadial, THREE.MathUtils.lerp(12, 14, beat))
         .addScaledVector(openingForward, THREE.MathUtils.lerp(4, 5.5, beat));
       cameraTarget.addScaledVector(openingRadial, 0.8).addScaledVector(WORLD_UP, 0.72);
-      this.setCinematicCopy('ORBITAL SLINGSHOT', 'Charging the next worldâ€¦');
+      this.setCinematicCopy('ORBITAL SLINGSHOT', 'Charging the next world…');
     } else if (raw < 0.62) {
       const beat = smoothstep((raw - 0.22) / 0.4);
       cameraOffset
@@ -644,7 +644,7 @@ export class Game {
         .addScaledVector(WORLD_UP, THREE.MathUtils.lerp(8, 18, beat))
         .addScaledVector(orbitSide, THREE.MathUtils.lerp(8, 15, beat));
       cameraTarget.copy(position).lerp(cinematic.start.clone().lerp(cinematic.end, 0.5), 0.24);
-      this.setCinematicCopy('STAR TRAIL', 'Crossing the interplanetary darkâ€¦');
+      this.setCinematicCopy('STAR TRAIL', 'Crossing the interplanetary dark…');
     } else {
       const beat = smoothstep((raw - 0.62) / 0.38);
       cameraOffset
