@@ -29,6 +29,8 @@ export interface Coin {
 export interface Enemy {
   readonly normal: THREE.Vector3;
   readonly mesh: THREE.Group;
+  readonly orbitAxis: THREE.Vector3;
+  readonly orbitSpeed: number;
   defeated: boolean;
   defeatAge: number;
 }
@@ -758,8 +760,14 @@ export class Planet {
         enemy.mesh.scale.setScalar(scale);
         continue;
       }
+      // Voidlings patrol their local orbit instead of sitting on a static
+      // marker. Mutating the surface normal keeps collision checks in sync
+      // with the rendered position while preserving the low-cost instanced
+      // planet decorations.
+      enemy.normal.applyAxisAngle(enemy.orbitAxis, delta * enemy.orbitSpeed).normalize();
       const bob = 0.16 + Math.sin(this.elapsed * 3.2 + enemy.normal.z * 11) * 0.11;
       enemy.mesh.position.copy(enemy.normal).multiplyScalar(this.definition.radius + 0.7 + bob);
+      enemy.mesh.quaternion.copy(surfaceOrientation(enemy.normal));
       enemy.mesh.rotateY(delta * 0.8);
     }
     if (this.boss) {
@@ -944,7 +952,17 @@ export class Planet {
       const mesh = createEnemy();
       mesh.position.copy(normal).multiplyScalar(this.definition.radius + 0.85);
       mesh.quaternion.copy(surfaceOrientation(normal));
-      this.enemies.push({ normal, mesh, defeated: false, defeatAge: 0 });
+      const orbitAxis = new THREE.Vector3().crossVectors(normal, UP);
+      if (orbitAxis.lengthSq() < 0.001) orbitAxis.set(1, 0, 0);
+      else orbitAxis.normalize();
+      this.enemies.push({
+        normal,
+        mesh,
+        orbitAxis,
+        orbitSpeed: 0.22 + deterministic(index * 53 + this.definition.radius) * 0.36,
+        defeated: false,
+        defeatAge: 0,
+      });
       this.group.add(mesh);
     }
   }

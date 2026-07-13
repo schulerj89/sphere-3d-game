@@ -1,4 +1,4 @@
-type SoundName = 'confirm' | 'jump' | 'coin' | 'pounce' | 'hit' | 'launch' | 'complete';
+type SoundName = 'confirm' | 'jump' | 'coin' | 'attack' | 'pounce' | 'hit' | 'launch' | 'complete';
 type MusicTrack = 'gameplay' | 'cinematic';
 
 const audioPath = (path: string): string => `${import.meta.env.BASE_URL}assets/audio/${path}`;
@@ -17,6 +17,8 @@ export class AudioDirector {
   private muted = false;
   private usingAssetMusic = false;
   private bossThemeActive = false;
+  private requestedBossTheme = false;
+  private cinematicActive = false;
 
   start(): void {
     if (!this.context) {
@@ -29,29 +31,25 @@ export class AudioDirector {
       this.musicGain.connect(this.master);
     }
     void this.context.resume();
-    this.setMusicTrack('gameplay');
+    if (this.requestedBossTheme) this.startBossTheme();
+    else this.setMusicTrack('gameplay');
   }
 
   setCinematic(active: boolean): void {
-    if (!this.context) return;
+    this.cinematicActive = active;
+    // A boss encounter owns the music bus. Transition/death camera changes
+    // should never silently replace the Warden theme while the fight is live.
+    if (!this.context || this.bossThemeActive) return;
     this.setMusicTrack(active ? 'cinematic' : 'gameplay');
   }
 
   /** Switches to a procedural boss motif so the final encounter needs no extra audio payload. */
   setBossTheme(active: boolean): void {
+    this.requestedBossTheme = active;
     if (!this.context || !this.musicGain) return;
     if (active) {
       if (this.bossThemeActive) return;
-      this.bossThemeActive = true;
-      this.music?.pause();
-      this.music = undefined;
-      this.musicSource = 'boss-synth';
-      this.usingAssetMusic = true;
-      if (this.loopTimer !== undefined) {
-        window.clearTimeout(this.loopTimer);
-        this.loopTimer = undefined;
-      }
-      this.scheduleBossMusic();
+      this.startBossTheme();
       return;
     }
     if (!this.bossThemeActive) return;
@@ -60,9 +58,9 @@ export class AudioDirector {
       window.clearTimeout(this.loopTimer);
       this.loopTimer = undefined;
     }
-    this.musicSource = undefined;
     this.usingAssetMusic = false;
-    this.setMusicTrack('gameplay');
+    this.musicSource = undefined;
+    this.setMusicTrack(this.cinematicActive ? 'cinematic' : 'gameplay');
   }
 
   toggleMute(): boolean {
@@ -74,10 +72,18 @@ export class AudioDirector {
 
   play(sound: SoundName): void {
     if (this.muted) return;
+    // Ring pickups use the Web Audio fallback directly. The previous
+    // per-pickup HTMLAudioElement could race network loads and randomly drop
+    // notes when several rings were collected in quick succession.
+    if (sound === 'coin') {
+      this.playSynthEffect(sound);
+      return;
+    }
     const effectPaths: Record<SoundName, string> = {
       confirm: 'sfx/ui-confirm.wav',
       jump: 'sfx/jump.wav',
       coin: 'sfx/coin.mp3',
+      attack: 'sfx/enemy-pounce.wav',
       pounce: 'sfx/enemy-pounce.wav',
       hit: 'sfx/hurt.wav',
       launch: 'sfx/dash.wav',
@@ -85,7 +91,7 @@ export class AudioDirector {
     };
     const effect = new Audio(audioPath(effectPaths[sound]));
     effect.volume = sound === 'launch' ? 0.38 : 0.34;
-    effect.playbackRate = sound === 'coin' ? 0.94 + Math.random() * 0.16 : 1;
+    effect.playbackRate = 1;
     void effect.play().catch(() => this.playSynthEffect(sound));
   }
 
@@ -93,7 +99,25 @@ export class AudioDirector {
     if (this.loopTimer !== undefined) window.clearTimeout(this.loopTimer);
     this.music?.pause();
     this.music = undefined;
+    this.requestedBossTheme = false;
+    this.bossThemeActive = false;
     void this.context?.close();
+  }
+
+  private startBossTheme(): void {
+    if (!this.context || !this.musicGain || this.bossThemeActive) return;
+    this.bossThemeActive = true;
+    this.music?.pause();
+    this.music = undefined;
+    this.musicSource = 'boss-synth';
+    // The synth is intentionally not marked as an asset track: this keeps the
+    // scheduler alive even when the prior gameplay MP3 failed to load.
+    this.usingAssetMusic = false;
+    if (this.loopTimer !== undefined) {
+      window.clearTimeout(this.loopTimer);
+      this.loopTimer = undefined;
+    }
+    this.scheduleBossMusic();
   }
 
   private setMusicTrack(track: MusicTrack, useCc0Fallback = false): void {
@@ -138,6 +162,7 @@ export class AudioDirector {
       confirm: [420, 740, 0.13, 'triangle'],
       jump: [230, 520, 0.14, 'triangle'],
       coin: [740, 1320, 0.16, 'sine'],
+      attack: [260, 680, 0.18, 'square'],
       pounce: [180, 820, 0.22, 'square'],
       hit: [180, 72, 0.28, 'sawtooth'],
       launch: [220, 1100, 0.7, 'sine'],

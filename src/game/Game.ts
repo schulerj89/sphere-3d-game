@@ -121,6 +121,8 @@ export class Game {
   private coins = 0;
   private defeatedEnemies = 0;
   private invulnerability = 0;
+  private attackCooldown = 0;
+  private attackWindow = 0;
   private trailCooldown = 0;
   private fps = 60;
   private muted = false;
@@ -278,6 +280,11 @@ export class Game {
 
   private updatePlaying(delta: number): void {
     this.updateCameraInput();
+    this.attackCooldown = Math.max(0, this.attackCooldown - delta);
+    this.attackWindow = Math.max(0, this.attackWindow - delta);
+    if (this.input?.consumeAttackPressed()) {
+      this.beginAttack();
+    }
     const movement = this.input?.movement ?? { x: 0, y: 0 };
     const desired = this.cameraRelativeMovement(movement.x, movement.y);
     const grounded = this.playerHeight <= 0.001;
@@ -401,6 +408,11 @@ export class Game {
       return;
     }
 
+    // A weapon strike gets first priority over contact damage. This makes the
+    // touch attack button deterministic: one press opens a short hit window,
+    // and the target is damaged at most once during that window.
+    if (this.attackWindow > 0 && this.resolveWeaponAttack()) return;
+
     const boss = this.activePlanet.bossNear(this.playerNormal);
     if (boss) {
       if (this.playerHeight > 0.72 && this.verticalVelocity < 0) {
@@ -449,6 +461,37 @@ export class Game {
     } else {
       this.setStatus('Ouch! Pounce from above or keep a little distance.');
     }
+  }
+
+  private beginAttack(): void {
+    if (this.phase !== 'playing' || this.attackCooldown > 0) return;
+    this.attackCooldown = 0.62;
+    this.attackWindow = 0.24;
+    this.triggerAnimation('pounce', 0.54);
+    this.audio.play('attack');
+    this.setStatus('Weapon strike! Close in on a Voidling or the Warden.');
+  }
+
+  private resolveWeaponAttack(): boolean {
+    const boss = this.activePlanet.bossNear(this.playerNormal, 3.15);
+    if (boss) {
+      const defeated = this.activePlanet.damageBoss();
+      this.attackWindow = 0;
+      this.audio.play('hit');
+      this.setStatus(defeated
+        ? 'The Crown Warden falls! One Aurora Crown relic is ready; collect the ring relic too.'
+        : `Crown Warden struck! ${boss.health}/${boss.maxHealth} armor remaining.`);
+      return true;
+    }
+
+    const enemy = this.activePlanet.enemyNear(this.playerNormal, 2.35);
+    if (!enemy) return false;
+    enemy.defeated = true;
+    this.attackWindow = 0;
+    this.defeatedEnemies += 1;
+    this.audio.play('hit');
+    this.setStatus('Voidling sliced! Keep your momentum and hunt more tokens.');
+    return true;
   }
 
   private beginLaunch(): void {
@@ -995,7 +1038,7 @@ export class Game {
             <h1><span>STARBOUND</span> SPRINT</h1>
             <p class="title-copy">Run every curve. Collect the light. Leap between living worlds.</p>
             <button class="start-button" type="button">START THE RUN <span>✦</span></button>
-            <p class="controls-copy">Left stick to move · drag the right side to orbit · pinch to zoom · JUMP to soar</p>
+            <p class="controls-copy">Left stick to move · drag right to orbit · JUMP to soar · ATTACK / F to strike</p>
           </div>
         </section>
         <section class="complete-screen is-hidden">

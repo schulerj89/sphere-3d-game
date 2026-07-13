@@ -38,6 +38,10 @@ const MOVEMENT_KEYS = new Set([
   'ArrowRight',
 ]);
 
+// Keep attack separate from the jump action so keyboard and touch users can
+// chain a weapon strike without accidentally launching Nova into the air.
+const ATTACK_KEYS = new Set(['KeyF', 'KeyX']);
+
 const INPUT_LISTENER_OPTIONS: AddEventListenerOptions = { passive: false };
 
 /**
@@ -52,6 +56,7 @@ export class MobileInput {
   private readonly joystickKnob: HTMLDivElement;
   private readonly lookSurface: HTMLDivElement;
   private readonly actionButton: HTMLButtonElement;
+  private readonly attackButton: HTMLButtonElement;
   private readonly joystickRadius: number;
   private readonly keyboardKeys = new Set<string>();
   private readonly lookPointers = new Map<number, PointerPoint>();
@@ -59,6 +64,7 @@ export class MobileInput {
   private destroyed = false;
   private joystickPointerId: number | null = null;
   private actionPointerId: number | null = null;
+  private attackPointerId: number | null = null;
   private joystickX = 0;
   private joystickY = 0;
   private lookDeltaX = 0;
@@ -66,6 +72,7 @@ export class MobileInput {
   private zoomDelta = 0;
   private pinchDistance: number | null = null;
   private jumpPressed = false;
+  private attackPressed = false;
 
   constructor(options: MobileInputOptions = {}) {
     if (typeof document === 'undefined') {
@@ -104,7 +111,13 @@ export class MobileInput {
     this.actionButton.setAttribute('aria-label', 'Jump');
     this.actionButton.textContent = 'JUMP';
 
-    overlay.append(this.lookSurface, this.joystick, this.actionButton);
+    this.attackButton = document.createElement('button');
+    this.attackButton.type = 'button';
+    this.attackButton.className = 'attack control';
+    this.attackButton.setAttribute('aria-label', 'Attack');
+    this.attackButton.textContent = 'ATTACK';
+
+    overlay.append(this.lookSurface, this.joystick, this.actionButton, this.attackButton);
     shadow.append(style, overlay);
     mount.append(this.host);
 
@@ -154,6 +167,13 @@ export class MobileInput {
     return pressed;
   }
 
+  /** Returns true once for each new weapon attack press, then clears it. */
+  consumeAttackPressed(): boolean {
+    const pressed = this.attackPressed;
+    this.attackPressed = false;
+    return pressed;
+  }
+
   /** True while Space or the on-screen jump button remains held. */
   get jumpHeld(): boolean {
     return !this.destroyed && (this.actionPointerId !== null || this.isKeyHeld('Space'));
@@ -175,6 +195,7 @@ export class MobileInput {
     this.destroyed = true;
     this.releasePointerCapture(this.joystick, this.joystickPointerId);
     this.releasePointerCapture(this.actionButton, this.actionPointerId);
+    this.releasePointerCapture(this.attackButton, this.attackPointerId);
     for (const pointerId of this.lookPointers.keys()) {
       this.releasePointerCapture(this.lookSurface, pointerId);
     }
@@ -184,6 +205,7 @@ export class MobileInput {
     this.lookPointers.clear();
     this.joystickPointerId = null;
     this.actionPointerId = null;
+    this.attackPointerId = null;
     this.host.remove();
   }
 
@@ -241,7 +263,22 @@ export class MobileInput {
     this.actionButton.addEventListener('lostpointercapture', this.handleActionLostCapture, { signal });
     this.actionButton.addEventListener('click', this.handleActionClick, { signal });
 
-    for (const control of [this.joystick, this.lookSurface, this.actionButton]) {
+    this.attackButton.addEventListener('pointerdown', this.handleAttackDown, {
+      ...INPUT_LISTENER_OPTIONS,
+      signal,
+    });
+    this.attackButton.addEventListener('pointerup', this.handleAttackEnd, {
+      ...INPUT_LISTENER_OPTIONS,
+      signal,
+    });
+    this.attackButton.addEventListener('pointercancel', this.handleAttackEnd, {
+      ...INPUT_LISTENER_OPTIONS,
+      signal,
+    });
+    this.attackButton.addEventListener('lostpointercapture', this.handleAttackLostCapture, { signal });
+    this.attackButton.addEventListener('click', this.handleAttackClick, { signal });
+
+    for (const control of [this.joystick, this.lookSurface, this.actionButton, this.attackButton]) {
       control.addEventListener('contextmenu', this.preventDefault, { signal });
     }
 
@@ -370,6 +407,41 @@ export class MobileInput {
     }
   };
 
+  private readonly handleAttackDown = (event: PointerEvent): void => {
+    if (this.attackPointerId !== null || !isPrimaryButton(event)) {
+      return;
+    }
+
+    this.preventEventDefault(event);
+    this.attackPointerId = event.pointerId;
+    this.attackButton.classList.add('is-pressed');
+    this.capturePointer(this.attackButton, event.pointerId);
+    this.attackPressed = true;
+  };
+
+  private readonly handleAttackEnd = (event: PointerEvent): void => {
+    if (event.pointerId !== this.attackPointerId) {
+      return;
+    }
+
+    this.preventEventDefault(event);
+    this.resetAttack();
+  };
+
+  private readonly handleAttackLostCapture = (event: PointerEvent): void => {
+    if (event.pointerId === this.attackPointerId) {
+      this.resetAttack();
+    }
+  };
+
+  private readonly handleAttackClick = (event: MouseEvent): void => {
+    // Keyboard activation creates a detail-free click. Pointer presses are
+    // already queued on pointerdown, so this avoids duplicate touch presses.
+    if (event.detail === 0) {
+      this.attackPressed = true;
+    }
+  };
+
   private readonly handleActionClick = (event: MouseEvent): void => {
     // Keyboard activation creates a detail-free click. Pointer presses are
     // already queued on pointerdown, so this avoids duplicate touch presses.
@@ -385,6 +457,9 @@ export class MobileInput {
     if (event.pointerId === this.actionPointerId) {
       this.resetAction();
     }
+    if (event.pointerId === this.attackPointerId) {
+      this.resetAttack();
+    }
     this.removeLookPointer(event.pointerId);
   };
 
@@ -399,6 +474,8 @@ export class MobileInput {
 
     if (event.code === 'Space' && !wasHeld) {
       this.jumpPressed = true;
+    } else if (ATTACK_KEYS.has(event.code) && !wasHeld) {
+      this.attackPressed = true;
     }
   };
 
@@ -423,6 +500,7 @@ export class MobileInput {
     this.keyboardKeys.clear();
     this.resetJoystick();
     this.resetAction();
+    this.resetAttack();
     for (const pointerId of this.lookPointers.keys()) {
       this.releasePointerCapture(this.lookSurface, pointerId);
     }
@@ -469,6 +547,12 @@ export class MobileInput {
     this.releasePointerCapture(this.actionButton, this.actionPointerId);
     this.actionPointerId = null;
     this.actionButton.classList.remove('is-pressed');
+  }
+
+  private resetAttack(): void {
+    this.releasePointerCapture(this.attackButton, this.attackPointerId);
+    this.attackPointerId = null;
+    this.attackButton.classList.remove('is-pressed');
   }
 
   private removeLookPointer(pointerId: number): void {
@@ -535,7 +619,7 @@ function isPrimaryButton(event: PointerEvent): boolean {
 }
 
 function isSupportedKey(code: string): boolean {
-  return code === 'Space' || MOVEMENT_KEYS.has(code);
+  return code === 'Space' || MOVEMENT_KEYS.has(code) || ATTACK_KEYS.has(code);
 }
 
 function isTextEntryTarget(target: EventTarget | null): boolean {
@@ -633,8 +717,34 @@ function createControlStyles(joystickRadius: number): string {
       transition: transform 80ms ease, filter 80ms ease;
     }
 
+    .attack {
+      position: absolute;
+      z-index: 2;
+      right: max(27px, calc(env(safe-area-inset-right) + 21px));
+      bottom: max(119px, calc(env(safe-area-inset-bottom) + 113px));
+      width: 68px;
+      height: 68px;
+      padding: 0;
+      border: 2px solid rgba(219, 235, 255, 0.8);
+      border-radius: 50%;
+      color: #eff7ff;
+      background: radial-gradient(circle at 35% 24%, #b9e5ff, #5377e6 48%, #272a91 100%);
+      box-shadow: inset 0 2px 10px rgba(255, 255, 255, 0.38), 0 8px 20px rgba(3, 8, 54, 0.42);
+      font: 800 10px/1 system-ui, sans-serif;
+      letter-spacing: 0.05em;
+      text-shadow: 0 1px 2px rgba(4, 12, 54, 0.85);
+      transform: scale(1);
+      transition: transform 80ms ease, filter 80ms ease;
+    }
+
     .action.is-pressed,
     .action:active {
+      filter: brightness(0.9);
+      transform: scale(0.93);
+    }
+
+    .attack.is-pressed,
+    .attack:active {
       filter: brightness(0.9);
       transform: scale(0.93);
     }
@@ -644,8 +754,14 @@ function createControlStyles(joystickRadius: number): string {
       outline-offset: 4px;
     }
 
+    .attack:focus-visible {
+      outline: 3px solid #d8f6ff;
+      outline-offset: 4px;
+    }
+
     @media (max-width: 360px) {
       .action { width: 72px; height: 72px; font-size: 11px; }
+      .attack { width: 60px; height: 60px; right: max(24px, calc(env(safe-area-inset-right) + 18px)); bottom: max(107px, calc(env(safe-area-inset-bottom) + 101px)); font-size: 9px; }
     }
   `;
 }
