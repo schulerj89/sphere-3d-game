@@ -19,6 +19,10 @@ if (new URLSearchParams(window.location.search).get('harness') === 'orientation'
   void import('./harness/PresentationHarness').then(({ PresentationHarness }) => {
     new PresentationHarness(app).start();
   });
+} else if (new URLSearchParams(window.location.search).get('harness') === 'weapon-cinematics') {
+  void import('./harness/WeaponCinematicHarness').then(({ WeaponCinematicHarness }) => {
+    new WeaponCinematicHarness(app).start();
+  });
 } else {
   new Game(app).start();
 }

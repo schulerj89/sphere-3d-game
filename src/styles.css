@@ -159,6 +159,60 @@ body {
 .presentation-label-defeat { left: 63.8%; color: #ffbfd2; }
 .presentation-label-relic { left: 86.2%; color: #ffe7a0; }
 
+.weapon-cinematic-harness-shell { background: radial-gradient(ellipse at 50% 56%, rgba(18, 65, 129, 0.22), transparent 57%), #020514; }
+.weapon-harness-panel { width: min(910px, calc(100vw - 32px)); }
+.weapon-harness-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 7px;
+  margin-top: 11px;
+}
+.weapon-harness-button {
+  padding: 7px 10px;
+  border: 1px solid rgba(158, 223, 255, 0.48);
+  border-radius: 8px;
+  color: #dff8ff;
+  background: rgba(21, 63, 104, 0.64);
+  box-shadow: inset 0 0 13px rgba(96, 207, 255, 0.14), 0 4px 14px rgba(0, 0, 0, 0.22);
+  cursor: pointer;
+  font-size: 0.59rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  transition: filter 130ms ease, transform 130ms ease, background 130ms ease;
+}
+.weapon-harness-button:hover { filter: brightness(1.18); transform: translateY(-1px); background: rgba(30, 93, 140, 0.78); }
+.weapon-harness-button:active { transform: translateY(1px); }
+.weapon-harness-button:focus-visible { outline: 2px solid #8eeaff; outline-offset: 3px; }
+.weapon-harness-phase {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 10px 0 0;
+  color: #fff5c1;
+  font-size: 0.63rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+.weapon-phase-dot { width: 8px; height: 8px; border-radius: 50%; background: #7cf1ff; box-shadow: 0 0 11px #7cf1ff; }
+.weapon-harness-note {
+  position: absolute;
+  z-index: 2;
+  bottom: 12%;
+  color: #e6f7ff;
+  font-size: clamp(0.48rem, 1.15vw, 0.69rem);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1.25;
+  text-align: center;
+  text-shadow: 0 2px 8px #001020;
+  transform: translateX(-50%);
+}
+.weapon-harness-note-hero { left: 21%; color: #ffe5a4; }
+.weapon-harness-note-target { left: 39%; color: #f4b6ff; }
+.weapon-harness-note-crown { left: 59%; color: #ffe7a0; }
+.weapon-harness-note-portal { left: 84%; width: 25%; color: #9eeeff; }
+
 button {
   font: inherit;
 }
