@@ -551,6 +551,9 @@ export class Game {
     if (this.phase !== 'playing' || this.attackCooldown > 0) return;
     this.attackCooldown = 0.62;
     this.attackWindow = 0.24;
+    // Only an explicit ATTACK/F press starts the mallet swing. Pouncing uses
+    // the character's jump/punch animation but must never activate the weapon.
+    this.hero.triggerWeaponAnimation('attack', this.elapsed);
     this.triggerAnimation('pounce', 0.54);
     this.audio.play('attack');
     this.setStatus('Weapon strike! Close in on a Voidling or the Warden.');
@@ -1461,11 +1464,10 @@ export class Game {
           node.receiveShadow = false;
         }
         // The toon-shooter GLB contains every gun/knife variant in one file.
-        // Keep one compact blaster and one knife for the game's two-slot
-        // attack presentation, and hide every other authored weapon branch.
-        const isWeaponRoot = /^(Revolver|Sniper|Pistol|SMG|GrenadeLauncher|ShortCannon|Shotgun|RocketLauncher|AK|Shovel|Knife)/.test(node.name)
-          && Boolean(node.parent && /Index1R|Index2R|Index3R/.test(node.parent.name));
-        if (isWeaponRoot && !/^(Pistol|Knife_1)$/.test(node.name)) {
+        // Hide all authored props; HeroVisual adds the game's one procedural
+        // mallet at the hand so a loader update cannot expose a second weapon.
+        const isAuthoredWeapon = /^(Revolver|Sniper|Pistol|SMG|GrenadeLauncher|ShortCannon|Shotgun|RocketLauncher|AK|Shovel|Knife)/.test(node.name);
+        if (isAuthoredWeapon) {
           node.visible = false;
         }
       });
@@ -1570,7 +1572,6 @@ export class Game {
 
   private triggerAnimation(name: string, duration: number): void {
     this.animationLockedUntil = this.elapsed + duration;
-    if (name === 'pounce') this.hero.triggerWeaponAnimation('attack', this.elapsed);
     this.setCharacterAnimation(name);
   }
 

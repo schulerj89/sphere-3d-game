@@ -1200,18 +1200,13 @@ export class Planet {
 
 export type HeroWeaponAnimation = 'equip' | 'attack';
 
-interface WeaponPose {
-  readonly object: THREE.Object3D;
-  readonly position: THREE.Vector3;
-  readonly quaternion: THREE.Quaternion;
-  readonly scale: THREE.Vector3;
-  readonly equipPosition: THREE.Vector3;
-  readonly equipQuaternion: THREE.Quaternion;
-  readonly equipScale: THREE.Vector3;
-}
-
-const HERO_WEAPON_LOADOUT = new Set(['1H_Crossbow', 'Knife_Offhand', 'Pistol', 'Knife_1']);
-const HERO_HIDDEN_WEAPONS = new Set(['2H_Crossbow', 'Knife', 'Throwable']);
+/**
+ * The Quaternius explorer ships every weapon variant in the same scene. None
+ * of those authored props are used by Starbound Sprint anymore: keeping them
+ * hidden here (as well as in Game's loader) makes the mallet the only readable
+ * weapon in both the authored and procedural fallback presentations.
+ */
+const HERO_AUTHORED_WEAPON_PATTERN = /^(Revolver|Sniper|Pistol|SMG|GrenadeLauncher|ShortCannon|Shotgun|RocketLauncher|AK|Shovel|Knife)/;
 
 export interface HeroVisual {
   readonly group: THREE.Group;
@@ -1286,50 +1281,84 @@ export function createHeroVisual(): HeroVisual {
   }
   fallback.add(body, helmet, visorMesh, pack, core);
 
-  // Character sources can ship every hand-slot prop in one scene. Keep a
-  // readable two-piece loadout (blaster/crossbow + offhand knife), and animate
-  // those props independently so equip/attack beats remain visible even when
-  // the authored arm clips are cross-faded. The knife is a vertical cylinder, so
-  // it needs a roll around its local Z axis to read as a slash (a small Y
-  // recoil, which works for the crossbow, is almost invisible on the blade).
-  let weaponPoses: WeaponPose[] = [];
+  // Keep one intentional weapon silhouette. The mallet is procedural so it
+  // remains available when the external GLB falls back, and it can use a
+  // deterministic hammer swing rather than relying on a weapon-specific clip
+  // from the character source.
+  const mallet = new THREE.Group();
+  mallet.name = 'Nova mallet';
+  const malletHandleMaterial = new THREE.MeshStandardMaterial({
+    color: 0x6d8ca6,
+    roughness: 0.28,
+    metalness: 0.68,
+  });
+  const malletHeadMaterial = new THREE.MeshStandardMaterial({
+    color: 0x65ecff,
+    emissive: 0x0879ad,
+    emissiveIntensity: 1.35,
+    roughness: 0.2,
+    metalness: 0.78,
+  });
+  const malletGrip = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.075, 0.72, 10), malletHandleMaterial);
+  malletGrip.name = 'mallet handle';
+  malletGrip.position.y = 0.32;
+  const malletHead = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.22, 0.24), malletHeadMaterial);
+  malletHead.name = 'mallet head';
+  malletHead.position.y = 0.76;
+  const malletCore = new THREE.Mesh(new THREE.SphereGeometry(0.09, 12, 8), new THREE.MeshBasicMaterial({
+    color: 0xd9fbff,
+    transparent: true,
+    opacity: 0.92,
+  }));
+  malletCore.name = 'mallet energy core';
+  malletCore.position.set(0, 0.76, 0.14);
+  mallet.add(malletGrip, malletHead, malletCore);
+  // The procedural fallback already lives in the hero root. Once an authored
+  // model is attached the mallet is reparented to its Index1R hand bone.
+  group.add(mallet);
+
+  let malletAnchor: THREE.Object3D = mallet;
+  let malletBasePosition = new THREE.Vector3(0.72, 1.2, 0.12);
+  let malletBaseQuaternion = new THREE.Quaternion();
+  let malletBaseScale = new THREE.Vector3(1, 1, 1);
+  mallet.position.copy(malletBasePosition);
   let weaponAnimation: { kind: HeroWeaponAnimation; start: number; duration: number } | undefined;
-  const weaponEquipOffset = new THREE.Vector3(0, 0.14, -0.05);
-  const weaponRecoil = new THREE.Quaternion();
-  const weaponRecoilAxis = new THREE.Vector3(0, 1, 0);
-  const knifeSwingAxis = new THREE.Vector3(0, 0, 1);
+  const malletSwingAxis = new THREE.Vector3(0, 0, 1);
+  const malletSwing = new THREE.Quaternion();
+  const malletFlight = new THREE.Vector3();
 
   const updateWeaponAnimation = (elapsed: number): void => {
     if (!weaponAnimation) return;
     const progress = THREE.MathUtils.clamp((elapsed - weaponAnimation.start) / weaponAnimation.duration, 0, 1);
     if (weaponAnimation.kind === 'equip') {
       const eased = 1 - Math.pow(1 - progress, 3);
-      for (const pose of weaponPoses) {
-        pose.object.position.lerpVectors(pose.equipPosition, pose.position, eased);
-        pose.object.quaternion.copy(pose.equipQuaternion).slerp(pose.quaternion, eased);
-        pose.object.scale.lerpVectors(pose.equipScale, pose.scale, eased);
-      }
+      malletAnchor.position.copy(malletBasePosition);
+      malletAnchor.quaternion.copy(malletBaseQuaternion);
+      malletAnchor.scale.lerpVectors(malletBaseScale.clone().multiplyScalar(0.08), malletBaseScale, eased);
     } else {
-      // The dual-wield attack clip drives both arms. This secondary hand-local
-      // recoil gives both retained weapons a readable impact without changing
-      // the source GLB or introducing another weapon mesh.
-      const pulse = Math.sin(progress * Math.PI);
-      for (const pose of weaponPoses) {
-        const isKnife = /knife/i.test(pose.object.name);
-        pose.object.position.copy(pose.position);
-        pose.object.position.z -= pulse * (isKnife ? 0.13 : 0.075);
-        pose.object.position.x += (isKnife ? -1 : 1) * pulse * (isKnife ? 0.07 : 0.035);
-        weaponRecoil.setFromAxisAngle(isKnife ? knifeSwingAxis : weaponRecoilAxis, pulse * (isKnife ? 0.72 : 0.24));
-        pose.object.quaternion.copy(pose.quaternion).multiply(weaponRecoil);
-        pose.object.scale.copy(pose.scale);
-      }
+      // Wind the mallet back, then arc it forward like a compact hammer strike.
+      // The small local flight offset makes the head visibly leave the hand for
+      // the impact beat, while the final reset returns it to the hand bone.
+      const windup = THREE.MathUtils.clamp(progress / 0.28, 0, 1);
+      const followThrough = THREE.MathUtils.clamp((progress - 0.28) / 0.72, 0, 1);
+      const easedWindup = windup * windup * (3 - 2 * windup);
+      const easedStrike = followThrough * followThrough * (3 - 2 * followThrough);
+      const angle = -1.15 * easedWindup + 2.5 * easedStrike;
+      // Convert the desired world-space hop to this anchor's local scale. The
+      // GLB hand bone carries a large armature scale, so a raw 0.11 local
+      // offset would launch the mallet meters away from Nova.
+      const flight = Math.sin(Math.min(1, progress) * Math.PI) * 0.11 * Math.max(0.001, malletBaseScale.x);
+      malletAnchor.position.copy(malletBasePosition);
+      malletFlight.set(0, -flight * 0.2, -flight);
+      malletAnchor.position.add(malletFlight);
+      malletSwing.setFromAxisAngle(malletSwingAxis, angle);
+      malletAnchor.quaternion.copy(malletBaseQuaternion).multiply(malletSwing);
+      malletAnchor.scale.copy(malletBaseScale);
     }
     if (progress >= 1) {
-      for (const pose of weaponPoses) {
-        pose.object.position.copy(pose.position);
-        pose.object.quaternion.copy(pose.quaternion);
-        pose.object.scale.copy(pose.scale);
-      }
+      malletAnchor.position.copy(malletBasePosition);
+      malletAnchor.quaternion.copy(malletBaseQuaternion);
+      malletAnchor.scale.copy(malletBaseScale);
       weaponAnimation = undefined;
     }
   };
@@ -1338,28 +1367,42 @@ export function createHeroVisual(): HeroVisual {
     group,
     attachModel(model: THREE.Object3D): void {
       fallback.visible = false;
-      weaponPoses = [];
+      // Hide every authored weapon branch before adding the single procedural
+      // mallet. This also covers descendants (Pistol_1, Knife_1_2, etc.) so a
+      // model update cannot reintroduce a second visible prop.
       model.traverse((node) => {
-        if (HERO_HIDDEN_WEAPONS.has(node.name)) {
+        if (HERO_AUTHORED_WEAPON_PATTERN.test(node.name)) {
           node.visible = false;
-          return;
         }
-        if (!HERO_WEAPON_LOADOUT.has(node.name)) return;
-        const pose: WeaponPose = {
-          object: node,
-          position: node.position.clone(),
-          quaternion: node.quaternion.clone(),
-          scale: node.scale.clone(),
-          // Start just above the hand and nearly collapsed. triggerWeaponAnimation
-          // will reveal the loadout with an intentional equip beat.
-          equipPosition: node.position.clone().add(weaponEquipOffset),
-          equipQuaternion: node.quaternion.clone(),
-          equipScale: node.scale.clone().multiplyScalar(0.08),
-        };
-        weaponPoses.push(pose);
-        node.visible = true;
       });
       group.add(model);
+      const hand = model.getObjectByName('Index1R') ?? model.getObjectByName('RightHand');
+      const referenceWeapon = model.getObjectByName('Pistol');
+      if (hand) {
+        hand.add(mallet);
+        // Keep animation transforms on the mallet itself; moving the hand bone
+        // would distort the authored armature and make every punch look wrong.
+        malletAnchor = mallet;
+        // Match the hand-slot orientation from the source, but calculate scale
+        // from the actual bone so this works for both authored and fallback
+        // model dimensions without a giant GLB-space mallet.
+        mallet.position.copy(referenceWeapon?.position ?? new THREE.Vector3(0, 0.0014, -0.00055));
+        mallet.quaternion.copy(referenceWeapon?.quaternion ?? new THREE.Quaternion());
+        model.updateWorldMatrix(true, true);
+        const handScale = hand.getWorldScale(new THREE.Vector3());
+        const inheritedScale = Math.max(0.001, Math.max(handScale.x, handScale.y, handScale.z));
+        const desiredMalletLength = 0.92;
+        mallet.scale.setScalar(desiredMalletLength / (1.1 * inheritedScale));
+      } else {
+        malletAnchor = mallet;
+        mallet.position.copy(malletBasePosition);
+        mallet.quaternion.identity();
+        mallet.scale.set(1, 1, 1);
+      }
+      mallet.visible = true;
+      malletBasePosition = mallet.position.clone();
+      malletBaseQuaternion = mallet.quaternion.clone();
+      malletBaseScale = mallet.scale.clone();
       weaponAnimation = undefined;
     },
     showFallback(): void {
@@ -1380,19 +1423,14 @@ export function createHeroVisual(): HeroVisual {
       suitAccent.emissiveIntensity = active ? 2.2 : 0.8;
     },
     triggerWeaponAnimation(animation: HeroWeaponAnimation, elapsed: number): void {
-      if (weaponPoses.length === 0) return;
       if (animation === 'equip') {
-        for (const pose of weaponPoses) {
-          pose.object.position.copy(pose.equipPosition);
-          pose.object.quaternion.copy(pose.equipQuaternion);
-          pose.object.scale.copy(pose.equipScale);
-        }
+        malletAnchor.position.copy(malletBasePosition);
+        malletAnchor.quaternion.copy(malletBaseQuaternion);
+        malletAnchor.scale.copy(malletBaseScale).multiplyScalar(0.08);
       } else {
-        for (const pose of weaponPoses) {
-          pose.object.position.copy(pose.position);
-          pose.object.quaternion.copy(pose.quaternion);
-          pose.object.scale.copy(pose.scale);
-        }
+        malletAnchor.position.copy(malletBasePosition);
+        malletAnchor.quaternion.copy(malletBaseQuaternion);
+        malletAnchor.scale.copy(malletBaseScale);
       }
       weaponAnimation = {
         kind: animation,
