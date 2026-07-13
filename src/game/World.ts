@@ -37,12 +37,23 @@ export interface Enemy {
 
 export interface PlanetBoss {
   readonly normal: THREE.Vector3;
+  /** Stable arena anchor used while the Warden patrols and lunges. */
+  readonly arenaNormal: THREE.Vector3;
+  readonly orbitAxis: THREE.Vector3;
   readonly mesh: THREE.Group;
   readonly maxHealth: number;
   health: number;
   defeated: boolean;
   defeatAge: number;
+  attackPhase: BossAttackPhase;
+  attackAge: number;
+  attackCooldown: number;
+  attackStartNormal: THREE.Vector3;
+  attackTargetNormal: THREE.Vector3;
+  attackHit: boolean;
 }
+
+export type BossAttackPhase = 'idle' | 'telegraph' | 'lunge' | 'recover';
 
 export interface PlanetRelic {
   readonly source: 'rings' | 'boss';
@@ -127,6 +138,29 @@ function deterministic(seed: number): number {
 
 function arcDistance(a: THREE.Vector3, b: THREE.Vector3, radius: number): number {
   return Math.acos(THREE.MathUtils.clamp(a.dot(b), -1, 1)) * radius;
+}
+
+function smoothstep(value: number): number {
+  const t = THREE.MathUtils.clamp(value, 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
+function slerpNormal(from: THREE.Vector3, to: THREE.Vector3, amount: number, target: THREE.Vector3): THREE.Vector3 {
+  const start = from.clone().normalize();
+  const end = to.clone().normalize();
+  const angle = start.angleTo(end);
+  if (angle < 0.0001) return target.copy(start);
+  const axis = new THREE.Vector3().crossVectors(start, end);
+  if (axis.lengthSq() < 0.000001) {
+    // Opposite normals have no unique great-circle axis. The boss's patrol
+    // axis is stable and keeps the lunge from snapping through the planet.
+    axis.set(1, 0, 0);
+    if (Math.abs(axis.dot(start)) > 0.9) axis.set(0, 0, 1);
+    axis.projectOnPlane(start).normalize();
+  } else {
+    axis.normalize();
+  }
+  return target.copy(start).applyAxisAngle(axis, angle * THREE.MathUtils.clamp(amount, 0, 1)).normalize();
 }
 
 function colorForSurface(primary: THREE.Color, secondary: THREE.Color, normal: THREE.Vector3, variation: number): THREE.Color {
@@ -627,13 +661,27 @@ export class Planet {
       const bossMesh = createBoss();
       bossMesh.position.copy(definition.bossNormal).multiplyScalar(definition.radius + 0.58);
       bossMesh.quaternion.copy(surfaceOrientation(definition.bossNormal));
+      const bossOrbitAxis = new THREE.Vector3().crossVectors(definition.bossNormal, UP);
+      if (bossOrbitAxis.lengthSq() < 0.001) bossOrbitAxis.set(1, 0, 0);
+      else bossOrbitAxis.normalize();
+      const bossAnchor = definition.bossNormal.clone().normalize();
       this.boss = {
-        normal: definition.bossNormal.clone(),
+        normal: bossAnchor.clone(),
+        arenaNormal: bossAnchor.clone(),
+        orbitAxis: bossOrbitAxis,
         mesh: bossMesh,
         maxHealth: definition.bossHealth ?? 5,
         health: definition.bossHealth ?? 5,
         defeated: false,
         defeatAge: 0,
+        attackPhase: 'idle',
+        attackAge: 0,
+        // Delay the first lunge long enough for the player to read the arena
+        // and the Warden's telegraph after landing on Aurora Crown.
+        attackCooldown: 2.25,
+        attackStartNormal: bossAnchor.clone(),
+        attackTargetNormal: bossAnchor.clone(),
+        attackHit: false,
       };
       const arena = createBossArena(definition.atmosphere);
       arena.position.copy(definition.bossNormal).multiplyScalar(definition.radius + 0.14);
@@ -726,6 +774,9 @@ export class Planet {
     if (this.boss.health > 0) return false;
     this.boss.defeated = true;
     this.boss.defeatAge = 0;
+    this.boss.attackPhase = 'idle';
+    this.boss.attackAge = 0;
+    this.boss.attackHit = false;
     return true;
   }
 
@@ -745,7 +796,7 @@ export class Planet {
     return arcDistance(this.definition.launchNormal, normal, this.definition.radius) < 2.1;
   }
 
-  update(delta: number): void {
+  update(delta: number, bossTarget?: THREE.Vector3): void {
     this.elapsed += delta;
     for (const coin of this.coins) {
       if (coin.collected) continue;
@@ -777,11 +828,23 @@ export class Planet {
         this.boss.mesh.scale.setScalar(collapse);
         this.boss.mesh.rotation.y += delta * 2.4;
       } else {
-        const bob = Math.sin(this.elapsed * 2.4) * 0.18;
+        this.updateBossEncounter(delta, bossTarget);
+        const attackPulse = this.boss.attackPhase === 'telegraph'
+          ? 1 + Math.sin(this.boss.attackAge * 26) * 0.08
+          : this.boss.attackPhase === 'lunge' ? 1.12 : 1;
+        this.boss.mesh.scale.setScalar(attackPulse);
+        const bob = Math.sin(this.elapsed * 2.4) * 0.18
+          + (this.boss.attackPhase === 'telegraph' ? Math.sin(this.boss.attackAge * 18) * 0.09 : 0);
         this.boss.mesh.position.copy(this.boss.normal).multiplyScalar(this.definition.radius + 0.58 + bob);
         this.boss.mesh.rotateY(delta * 0.45);
         const aura = this.boss.mesh.getObjectByName('boss-aura');
-        if (aura) aura.rotation.z += delta * 1.8;
+        if (aura) {
+          aura.rotation.z += delta * (this.boss.attackPhase === 'telegraph' ? 5.2 : 1.8);
+          const auraMesh = aura as THREE.Mesh<THREE.TorusGeometry, THREE.MeshBasicMaterial>;
+          auraMesh.material.opacity = this.boss.attackPhase === 'telegraph'
+            ? 0.68 + Math.sin(this.boss.attackAge * 22) * 0.18
+            : 0.72;
+        }
       }
     }
     for (const [index, relic] of this.relics.entries()) {
@@ -795,6 +858,65 @@ export class Planet {
     const launchPulse = this.isLaunchReady ? 1.35 + Math.sin(this.elapsed * 5) * 0.45 : 0.38;
     this.launchMaterial.emissiveIntensity = launchPulse;
     this.launchPad.rotation.y += delta * (this.isLaunchReady ? 0.9 : 0.22);
+  }
+
+  /**
+   * Runs the Warden's lightweight arena AI. The boss moves on the planet's
+   * surface rather than teleporting, telegraphs a lunge with a pulsing aura,
+   * then recovers back toward its arena anchor. Game.ts consumes `attackHit`
+   * when the lunge reaches Nova so a single attack cannot drain several hearts.
+   */
+  private updateBossEncounter(delta: number, targetNormal?: THREE.Vector3): void {
+    const boss = this.boss;
+    if (!boss || !targetNormal) return;
+
+    boss.attackCooldown = Math.max(0, boss.attackCooldown - delta);
+    if (boss.attackPhase === 'idle') {
+      // Keep a readable patrol orbit around the arena while waiting for Nova.
+      // The small arc preserves the arena landmark and makes the boss visibly
+      // alive even when the player is collecting rings on the far side.
+      const patrol = Math.sin(this.elapsed * 0.72) * 0.16;
+      boss.normal.copy(boss.arenaNormal).applyAxisAngle(boss.orbitAxis, patrol).normalize();
+      const distance = arcDistance(boss.normal, targetNormal, this.definition.radius);
+      if (boss.attackCooldown <= 0 && distance < 13.5) {
+        boss.attackPhase = 'telegraph';
+        boss.attackAge = 0;
+        boss.attackStartNormal.copy(boss.normal);
+        boss.attackTargetNormal.copy(targetNormal).normalize();
+        boss.attackHit = false;
+        boss.attackCooldown = 4.4;
+      }
+      return;
+    }
+
+    boss.attackAge += delta;
+    if (boss.attackPhase === 'telegraph') {
+      // Hold position while the glow and scale pulse tell the player to move.
+      boss.normal.copy(boss.attackStartNormal);
+      if (boss.attackAge >= 0.72) {
+        boss.attackPhase = 'lunge';
+        boss.attackAge = 0;
+      }
+      return;
+    }
+
+    if (boss.attackPhase === 'lunge') {
+      const progress = THREE.MathUtils.clamp(boss.attackAge / 0.38, 0, 1);
+      slerpNormal(boss.attackStartNormal, boss.attackTargetNormal, smoothstep(progress), boss.normal);
+      if (progress >= 1) {
+        boss.attackPhase = 'recover';
+        boss.attackAge = 0;
+      }
+      return;
+    }
+
+    // Recover from the strike with a clear, readable return beat.
+    const recover = THREE.MathUtils.clamp(boss.attackAge / 0.9, 0, 1);
+    slerpNormal(boss.normal, boss.arenaNormal, smoothstep(recover), boss.normal);
+    if (recover >= 1) {
+      boss.attackPhase = 'idle';
+      boss.attackAge = 0;
+    }
   }
 
   private isRelicUnlocked(relic: PlanetRelic): boolean {

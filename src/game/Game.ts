@@ -50,6 +50,8 @@ interface StarboundDebugSnapshot {
     readonly health: number;
     readonly maxHealth: number;
     readonly defeated: boolean;
+    readonly attackPhase: string;
+    readonly attackCooldown: number;
     readonly relicsReady: number;
     readonly relicsCollected: number;
     readonly relicsTotal: number;
@@ -262,7 +264,12 @@ export class Game {
     this.galaxy.update(delta);
     this.trail.update(delta);
     this.modelMixer?.update(delta);
-    for (const planet of this.planets) planet.update(delta);
+    for (const planet of this.planets) {
+      // Only the active arena supplies a target to the Warden AI. Other
+      // planets keep their deterministic visual animation without trying to
+      // attack a player who is in transit or on another world.
+      planet.update(delta, this.phase === 'playing' && planet === this.activePlanet ? this.playerNormal : undefined);
+    }
 
     if (this.phase === 'playing') {
       this.updatePlaying(delta);
@@ -420,9 +427,35 @@ export class Game {
         this.verticalVelocity = 10.2;
         this.audio.play('pounce');
         this.triggerAnimation('pounce', 0.52);
+        if (defeated) {
+          // The arena score resolves as soon as the Warden falls. Do not
+          // leave the boss scheduler running while Nova hunts the second
+          // crown relic.
+          this.audio.setBossTheme(false);
+          this.audio.setCinematic(false);
+        }
         this.setStatus(defeated
           ? 'The Crown Warden falls! One Aurora Crown relic is ready; collect the ring relic too.'
           : `Crown Warden struck! ${boss.health}/${boss.maxHealth} armor remaining.`);
+        return;
+      }
+      if (boss.attackPhase === 'telegraph') {
+        if (boss.attackAge < 0.1) this.setStatus('The Crown Warden is charging a lunge — move!');
+        return;
+      }
+      if (boss.attackPhase === 'lunge') {
+        if (boss.attackHit || this.invulnerability > 0 || this.playerHeight > 0.45) return;
+        boss.attackHit = true;
+        this.health -= 1;
+        this.invulnerability = 1.25;
+        this.verticalVelocity = 6.8;
+        this.audio.play('hit');
+        this.triggerAnimation('hurt', 0.4);
+        if (this.health <= 0) {
+          this.beginDefeat();
+        } else {
+          this.setStatus('The Warden lunge connected. Keep moving between telegraphs.');
+        }
         return;
       }
       if (this.invulnerability > 0 || this.playerHeight > 0.45) return;
@@ -478,6 +511,10 @@ export class Game {
       const defeated = this.activePlanet.damageBoss();
       this.attackWindow = 0;
       this.audio.play('hit');
+      if (defeated) {
+        this.audio.setBossTheme(false);
+        this.audio.setCinematic(false);
+      }
       this.setStatus(defeated
         ? 'The Crown Warden falls! One Aurora Crown relic is ready; collect the ring relic too.'
         : `Crown Warden struck! ${boss.health}/${boss.maxHealth} armor remaining.`);
@@ -968,7 +1005,7 @@ export class Game {
       this.bossMeterFill.style.width = `${Math.round(healthRatio * 100)}%`;
       this.bossMeterText.textContent = planet.boss.defeated
         ? `WARDEN DEFEATED | ${planet.relicsCollected}/${planet.relics.length} RELICS`
-        : `${planet.boss.health}/${planet.boss.maxHealth} ARMOR | ${planet.relicsCollected}/${planet.relics.length} RELICS`;
+        : `${planet.boss.health}/${planet.boss.maxHealth} ARMOR${planet.boss.attackPhase === 'telegraph' ? ' | CHARGING' : ''} | ${planet.relicsCollected}/${planet.relics.length} RELICS`;
     } else {
       this.bossCard.classList.add('is-hidden');
     }
@@ -999,6 +1036,8 @@ export class Game {
           health: this.activePlanet.boss.health,
           maxHealth: this.activePlanet.boss.maxHealth,
           defeated: this.activePlanet.boss.defeated,
+          attackPhase: this.activePlanet.boss.attackPhase,
+          attackCooldown: this.activePlanet.boss.attackCooldown,
           relicsReady: this.activePlanet.relicsReady,
           relicsCollected: this.activePlanet.relicsCollected,
           relicsTotal: this.activePlanet.relics.length,

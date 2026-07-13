@@ -30,13 +30,14 @@ export class AudioDirector {
       this.musicGain.gain.value = 0.19;
       this.musicGain.connect(this.master);
     }
-    void this.context.resume();
+    this.resumeContext();
     if (this.requestedBossTheme) this.startBossTheme();
     else this.setMusicTrack('gameplay');
   }
 
   setCinematic(active: boolean): void {
     this.cinematicActive = active;
+    this.resumeContext();
     // A boss encounter owns the music bus. Transition/death camera changes
     // should never silently replace the Warden theme while the fight is live.
     if (!this.context || this.bossThemeActive) return;
@@ -46,6 +47,7 @@ export class AudioDirector {
   /** Switches to a procedural boss motif so the final encounter needs no extra audio payload. */
   setBossTheme(active: boolean): void {
     this.requestedBossTheme = active;
+    this.resumeContext();
     if (!this.context || !this.musicGain) return;
     if (active) {
       if (this.bossThemeActive) return;
@@ -60,6 +62,7 @@ export class AudioDirector {
     }
     this.usingAssetMusic = false;
     this.musicSource = undefined;
+    this.musicGain.gain.value = 0.19;
     this.setMusicTrack(this.cinematicActive ? 'cinematic' : 'gameplay');
   }
 
@@ -113,6 +116,10 @@ export class AudioDirector {
     // The synth is intentionally not marked as an asset track: this keeps the
     // scheduler alive even when the prior gameplay MP3 failed to load.
     this.usingAssetMusic = false;
+    // Synthesized boss music is intentionally louder than the ambient score
+    // so the third-planet arrival and combat beat cannot sound silent on
+    // mobile speakers after a long transition.
+    this.musicGain.gain.value = 0.27;
     if (this.loopTimer !== undefined) {
       window.clearTimeout(this.loopTimer);
       this.loopTimer = undefined;
@@ -195,6 +202,7 @@ export class AudioDirector {
 
   private scheduleBossMusic(): void {
     if (!this.context || !this.musicGain || !this.bossThemeActive) return;
+    this.resumeContext();
     const now = this.context.currentTime + 0.08;
     const phrase = [
       [110, 0], [130.81, 0.28], [164.81, 0.56], [146.83, 0.84],
@@ -204,11 +212,15 @@ export class AudioDirector {
       [110, 4.48], [164.81, 4.76], [220, 5.04],
     ] as const;
     for (const [frequency, offset] of phrase) {
-      this.tone(frequency, frequency * 0.985, 0.22, 'sawtooth', 0.045, now + offset, this.musicGain);
-      this.tone(frequency * 2, frequency * 1.92, 0.12, 'triangle', 0.025, now + offset + 0.04, this.musicGain);
+      this.tone(frequency, frequency * 0.985, 0.22, 'sawtooth', 0.072, now + offset, this.musicGain);
+      this.tone(frequency * 2, frequency * 1.92, 0.12, 'triangle', 0.038, now + offset + 0.04, this.musicGain);
     }
-    this.tone(55, 55, 5.25, 'sine', 0.055, now, this.musicGain);
+    this.tone(55, 55, 5.25, 'sine', 0.08, now, this.musicGain);
     this.loopTimer = window.setTimeout(() => this.scheduleBossMusic(), 5600);
+  }
+
+  private resumeContext(): void {
+    if (this.context && this.context.state === 'suspended') void this.context.resume();
   }
 
   private tone(start: number, end: number, length: number, type: OscillatorType, volume: number, when: number, destination: AudioNode): void {
