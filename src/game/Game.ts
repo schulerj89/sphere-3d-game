@@ -128,6 +128,7 @@ export class Game {
   private invulnerability = 0;
   private attackCooldown = 0;
   private attackWindow = 0;
+  private retrying = false;
   private trailCooldown = 0;
   private fps = 60;
   private muted = false;
@@ -237,6 +238,7 @@ export class Game {
     this.element<HTMLButtonElement>('.start-button').addEventListener('click', this.begin);
     this.element<HTMLButtonElement>('.restart-button').addEventListener('click', () => window.location.reload());
     this.defeatRetryButton.addEventListener('click', this.retryRun);
+    this.defeatRetryButton.addEventListener('pointerup', this.retryRun);
     this.muteButton.addEventListener('click', () => {
       this.muted = this.audio.toggleMute();
       this.muteButton.textContent = this.muted ? 'SOUND OFF' : 'SOUND ON';
@@ -733,12 +735,14 @@ export class Game {
   }
 
   private readonly retryRun = (): void => {
+    if (this.retrying) return;
+    this.retrying = true;
     // Leave a development defeat route before reloading; otherwise the QA
     // harness would immediately replay the cinematic instead of testing the
     // actual retry path.
     const url = new URL(window.location.href);
     url.searchParams.delete('qa');
-    window.location.assign(`${url.pathname}${url.search}${url.hash}`);
+    window.location.replace(url.toString());
   };
 
   private beginBossVictory(finale = this.activePlanet.allRelicsCollected, source: 'rings' | 'boss' = 'boss'): void {
