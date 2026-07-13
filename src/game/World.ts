@@ -1314,7 +1314,7 @@ export function createHeroVisual(): HeroVisual {
   malletCore.position.set(0, 0.76, 0.14);
   mallet.add(malletGrip, malletHead, malletCore);
   // The procedural fallback already lives in the hero root. Once an authored
-  // model is attached the mallet is reparented to its Index1R hand bone.
+  // model is attached the mallet is reparented to its Index1L hand bone.
   group.add(mallet);
 
   let malletAnchor: THREE.Object3D = mallet;
@@ -1376,7 +1376,12 @@ export function createHeroVisual(): HeroVisual {
         }
       });
       group.add(model);
-      const hand = model.getObjectByName('Index1R') ?? model.getObjectByName('RightHand');
+      // The authored front-facing rig reads the previous Index1R placement on
+      // the wrong side of Nova in the gameplay camera. Use the mirrored left
+      // hand bone, then rebuild the grip rotation in the character's local
+      // frame so the mallet stays visible instead of inheriting the right-hand
+      // pistol's aim rotation.
+      const hand = model.getObjectByName('Index1L') ?? model.getObjectByName('LeftHand');
       const referenceWeapon = model.getObjectByName('Pistol');
       if (hand) {
         hand.add(mallet);
@@ -1387,8 +1392,10 @@ export function createHeroVisual(): HeroVisual {
         // from the actual bone so this works for both authored and fallback
         // model dimensions without a giant GLB-space mallet.
         mallet.position.copy(referenceWeapon?.position ?? new THREE.Vector3(0, 0.0014, -0.00055));
-        mallet.quaternion.copy(referenceWeapon?.quaternion ?? new THREE.Quaternion());
         model.updateWorldMatrix(true, true);
+        const handWorldQuaternion = hand.getWorldQuaternion(new THREE.Quaternion());
+        const modelWorldQuaternion = model.getWorldQuaternion(new THREE.Quaternion());
+        mallet.quaternion.copy(handWorldQuaternion.invert().multiply(modelWorldQuaternion));
         const handScale = hand.getWorldScale(new THREE.Vector3());
         const inheritedScale = Math.max(0.001, Math.max(handScale.x, handScale.y, handScale.z));
         const desiredMalletLength = 0.92;
