@@ -851,14 +851,18 @@ export class Planet {
     if (this.definition.bossNormal) noBuildZones.push(this.definition.bossNormal);
     const rockPlacements: Array<{ normal: THREE.Vector3; scale: number }> = [];
     const crystalPlacements: Array<{ normal: THREE.Vector3; scale: number }> = [];
-    for (let index = 0; index < 34; index += 1) {
+    // Keep the silhouette intentional: landmarks, collectibles, and the
+    // launch/boss beats should read before dressing. A small instanced set
+    // gives each orbit texture without the noisy scatter of placeholder rocks.
+    const decorationCount = this.definition.id === 'aurora' ? 18 : 14;
+    for (let index = 0; index < decorationCount; index += 1) {
       const normal = normalFromLatitudeLongitude(
         -0.92 + deterministic(index * 5 + this.definition.radius) * 1.84,
         deterministic(index * 7 + this.definition.center.x) * Math.PI * 2,
       );
-      if (noBuildZones.some((zone) => arcDistance(zone, normal, this.definition.radius) < 2.5)) continue;
+      if (noBuildZones.some((zone) => arcDistance(zone, normal, this.definition.radius) < 3.1)) continue;
       const scale = 0.45 + deterministic(index * 13) * 0.85;
-      if (index % 3 === 0) {
+      if (index % 4 === 0) {
         crystalPlacements.push({ normal, scale });
       } else {
         rockPlacements.push({ normal, scale });
@@ -908,14 +912,15 @@ export class Planet {
     this.group.add(rockMesh, crystalMesh);
 
     const cloudMaterial = createCloudMaterial(this.definition.atmosphere);
-    for (let index = 0; index < 9; index += 1) {
+    const cloudCount = this.definition.id === 'aurora' ? 4 : 5;
+    for (let index = 0; index < cloudCount; index += 1) {
       const normal = normalFromLatitudeLongitude(
         -0.45 + deterministic(index * 19 + this.definition.radius) * 0.9,
         deterministic(index * 23 + this.definition.center.z) * Math.PI * 2,
       );
       const cloud = new THREE.Sprite(cloudMaterial);
       cloud.position.copy(normal).multiplyScalar(this.definition.radius + 0.7);
-      cloud.scale.setScalar(2.7 + deterministic(index * 29) * 2.5);
+      cloud.scale.setScalar(2.35 + deterministic(index * 29) * 1.65);
       this.group.add(cloud);
     }
   }
